@@ -206,9 +206,21 @@ def test_ngram_verification_applies_logit_bias_and_min_p(
         assert num_unfiltered_below > 0
 
 
-@single_gpu_only
-def test_suffix_splice_mtp_llm_correctness(vllm_runner):
-    model = "Qwen/Qwen3.5-0.8B-Base"
+class SpliceProbe:
+    def read_splice_state(self):
+        speculator = self.model_runner.speculator
+        drafter = getattr(speculator, "drafter", None)
+        observed = (
+            int(speculator.suffix_stats[..., 1].sum().item())
+            if hasattr(speculator, "suffix_stats")
+            else 0
+        )
+        return type(drafter).__name__, observed
+
+
+def check_splice_llm_correctness(
+    vllm_runner, model, speculative_config, common, expected_drafter
+):
     prompts = [
         (
             "Repeat this exact sentence three times: The quick brown fox jumps over "
@@ -216,14 +228,6 @@ def test_suffix_splice_mtp_llm_correctness(vllm_runner):
         ),
         "Write a haiku about rain.",
     ]
-    common = dict(
-        block_size=None,
-        max_model_len=1024,
-        enable_chunked_prefill=None,
-        enable_prefix_caching=False,
-        compilation_config=CompilationConfig(),
-        limit_mm_per_prompt={"image": 0, "video": 0},
-    )
 
     def generate(runner):
         return runner.generate_greedy_logprobs(prompts, max_tokens=48, num_logprobs=5)
@@ -233,27 +237,14 @@ def test_suffix_splice_mtp_llm_correctness(vllm_runner):
 
     with vllm_runner(
         model,
-        speculative_config={
-            "method": "mtp",
-            "num_speculative_tokens": 3,
-            "suffix_hybrid_mode": "splice",
-            "suffix_hybrid_min_match_length": 2,
-            "suffix_decoding_max_tree_depth": 8,
-            "suffix_decoding_corpus_tokens": 65536,
-        },
-        disable_log_stats=False,
+        speculative_config=speculative_config,
+        worker_extension_cls=f"{__name__}.SpliceProbe",
         **common,
     ) as runner:
         cold = generate(runner)
-        cold_metrics = runner.llm.get_metrics()
-        cold_drafts = get_spec_decode_metric_value(
-            cold_metrics, "vllm:spec_decode_num_drafts"
-        )
-        cold_accepted = get_spec_decode_metric_value(
-            cold_metrics, "vllm:spec_decode_num_accepted_tokens"
-        )
+        drafter, cold_observed = runner.llm.collective_rpc("read_splice_state")[0]
         hot = generate(runner)
-        hot_metrics = runner.llm.get_metrics()
+        _, hot_observed = runner.llm.collective_rpc("read_splice_state")[0]
 
     check_logprobs_close(
         outputs_0_lst=expected,
@@ -267,12 +258,63 @@ def test_suffix_splice_mtp_llm_correctness(vllm_runner):
         name_0="target",
         name_1="splice-hot",
     )
-    hot_drafts = get_spec_decode_metric_value(
-        hot_metrics, "vllm:spec_decode_num_drafts"
+    assert drafter == expected_drafter
+    assert hot_observed > cold_observed
+
+
+@single_gpu_only
+def test_suffix_splice_mtp_llm_correctness(vllm_runner):
+    check_splice_llm_correctness(
+        vllm_runner,
+        model="Qwen/Qwen3.5-0.8B-Base",
+        speculative_config={
+            "method": "mtp",
+            "num_speculative_tokens": 3,
+            "suffix_hybrid_mode": "splice",
+            "suffix_hybrid_min_match_length": 2,
+            "suffix_decoding_max_tree_depth": 8,
+            "suffix_decoding_corpus_tokens": 65536,
+        },
+        common=dict(
+            block_size=None,
+            max_model_len=1024,
+            enable_chunked_prefill=None,
+            enable_prefix_caching=False,
+            compilation_config=CompilationConfig(),
+            limit_mm_per_prompt={"image": 0, "video": 0},
+        ),
+        expected_drafter="MTPSpeculator",
     )
-    hot_accepted = get_spec_decode_metric_value(
-        hot_metrics, "vllm:spec_decode_num_accepted_tokens"
+
+
+@single_gpu_only
+def test_suffix_splice_dflash2_llm_correctness(vllm_runner):
+    check_splice_llm_correctness(
+        vllm_runner,
+        model=(
+            "RedHatAI/Qwen3.5-4B-quantized.w4a16"
+            if current_platform.is_cuda()
+            else "Qwen/Qwen3.5-4B"
+        ),
+        speculative_config={
+            "method": "dflash",
+            "model": "vllm-project/Qwen3.5-4B-DFlash2",
+            "num_speculative_tokens": 7,
+            "suffix_hybrid_mode": "splice",
+            "suffix_hybrid_min_match_length": 2,
+            "suffix_decoding_max_tree_depth": 8,
+            "suffix_decoding_corpus_tokens": 65536,
+        },
+        common=dict(
+            block_size=None,
+            max_model_len=512,
+            max_num_seqs=1,
+            max_num_batched_tokens=256,
+            language_model_only=True,
+            enable_chunked_prefill=None,
+            enable_prefix_caching=False,
+            compilation_config=CompilationConfig(),
+            gpu_memory_utilization=0.98,
+        ),
+        expected_drafter="DFlash2Speculator",
     )
-    cold_rate = cold_accepted / cold_drafts
-    hot_rate = (hot_accepted - cold_accepted) / (hot_drafts - cold_drafts)
-    assert hot_rate > cold_rate

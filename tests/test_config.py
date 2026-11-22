@@ -2687,9 +2687,7 @@ def test_draft_model_enables_async_scheduling_by_default():
     assert cfg.scheduler_config.async_scheduling is True
 
 
-def test_dflash_allows_async_scheduling(tmp_path: Path):
-    """DFlash must stay async-schedulable: it was the only parallel-drafting
-    method excluded from the allowlist."""
+def _make_dflash2_spec(tmp_path: Path, architecture="DFlash2DraftModel", **kwargs):
     from transformers import LlamaConfig
 
     common = dict(
@@ -2711,7 +2709,7 @@ def test_dflash_allows_async_scheduling(tmp_path: Path):
         draft_path / "config.json",
         dict(
             common,
-            architectures=["DFlash2DraftModel"],
+            architectures=[architecture],
             model_type="qwen3",
             num_hidden_layers=1,
             layer_types=["sliding_attention"],
@@ -2727,16 +2725,31 @@ def test_dflash_allows_async_scheduling(tmp_path: Path):
             ),
         ),
     )
-    parallel_config = ParallelConfig(distributed_executor_backend="uni")
+    parallel_config = kwargs.pop(
+        "target_parallel_config", ParallelConfig(distributed_executor_backend="uni")
+    )
     model_config = ModelConfig(
         model=str(target_path), tokenizer_mode="skip", max_model_len=2048
     )
     speculative_config = SpeculativeConfig(
         method="dflash",
         model=str(draft_path),
-        num_speculative_tokens=3,
+        num_speculative_tokens=kwargs.pop("num_speculative_tokens", 3),
+        suffix_hybrid_mode=kwargs.pop("suffix_hybrid_mode", "splice"),
         target_model_config=model_config,
         target_parallel_config=parallel_config,
+        **kwargs,
+    )
+    return speculative_config, model_config, parallel_config
+
+
+@pytest.mark.parametrize("suffix_hybrid_mode", ["off", "splice"])
+def test_dflash2_splice_allows_async_scheduling(
+    tmp_path: Path, suffix_hybrid_mode: str
+):
+    """The candidate-head DFlash2 drafter supports splice and async scheduling."""
+    speculative_config, model_config, parallel_config = _make_dflash2_spec(
+        tmp_path, suffix_hybrid_mode=suffix_hybrid_mode
     )
     cfg = VllmConfig(
         model_config=model_config,
@@ -2749,7 +2762,48 @@ def test_dflash_allows_async_scheduling(tmp_path: Path):
     )
 
     assert speculative_config.method == "dflash"
+    assert type(speculative_config.speculator_config) is DFlash2SpeculatorConfig
     assert cfg.scheduler_config.async_scheduling is True
+
+
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({"suffix_hybrid_prefix_length": 0}, "prefix_length"),
+        ({"suffix_hybrid_prefix_length": 3}, "prefix_length"),
+        ({"suffix_hybrid_min_match_length": 0}, "min_match_length"),
+        (
+            {
+                "suffix_decoding_max_tree_depth": 8,
+                "suffix_hybrid_min_match_length": 9,
+            },
+            "min_match_length",
+        ),
+        ({"suffix_hybrid_min_expected_accepted": -0.1}, "min_expected_accepted"),
+        ({"suffix_hybrid_min_expected_accepted": 3.1}, "min_expected_accepted"),
+        ({"draft_sample_method": "probabilistic"}, "greedy drafting"),
+        ({"rejection_sample_method": "synthetic"}, "standard target verification"),
+        ({"enable_adaptive_verification": True}, "does not support adaptive"),
+        ({"prefill_context_kv_only": True}, "does not support adaptive"),
+        (
+            {
+                "target_parallel_config": ParallelConfig(
+                    distributed_executor_backend="uni", enable_dbo=True
+                )
+            },
+            "DBO or microbatching",
+        ),
+    ],
+)
+def test_suffix_splice_rejects_invalid_dflash2_options(tmp_path, overrides, match):
+    with pytest.raises(ValueError, match=match):
+        _make_dflash2_spec(tmp_path, **overrides)
+
+
+@pytest.mark.parametrize("architecture", ["DSpineDraftModel", "LiLiCorrDraftModel"])
+def test_suffix_splice_rejects_other_dflash_families(tmp_path, architecture):
+    with pytest.raises(ValueError, match="Suffix splice supports only"):
+        _make_dflash2_spec(tmp_path, architecture=architecture)
 
 
 @pytest.mark.skip_global_cleanup
@@ -5056,13 +5110,19 @@ def _watermarked_vllm_config() -> VllmConfig:
     return config
 
 
-def test_suffix_splice_rejects_watermarking():
-    config = _watermarked_vllm_config()
-    config.speculative_config = fake_speculative_config(
-        method="mtp", suffix_hybrid_mode="splice"
-    )
+def test_suffix_splice_rejects_watermarking(tmp_path):
+    speculative_config, model_config, parallel_config = _make_dflash2_spec(tmp_path)
     with pytest.raises(ValueError, match="does not support watermarking"):
-        config._check_supports_watermarking()
+        VllmConfig(
+            model_config=model_config,
+            scheduler_config=SchedulerConfig(
+                max_model_len=2048,
+                is_encoder_decoder=False,
+            ),
+            parallel_config=parallel_config,
+            speculative_config=speculative_config,
+            watermark_config=WatermarkConfig(key=42),
+        )
 
 
 def test_target_only_gumbel_allows_speculative_decoding(caplog_vllm, disable_log_dedup):

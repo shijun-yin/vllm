@@ -320,4 +320,8 @@ def test_splice_corpus_filters_partial_and_short_matches():
 
 
 def test_splice_prefix_does_not_read_past_history_allocation():
-    run_suffix_query([1, 2, 3, 4, 5, 6, 7, 8], 2, prefix=[9, 10], max_len=8)
+    assert run_suffix_query([1, 2, 3, 4, 5, 6, 7, 8], 2, prefix=[9, 10], max_len=8) == (
+        [8, 8],
+        0,
+        0,
+    )

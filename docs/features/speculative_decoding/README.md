@@ -67,10 +67,29 @@ enable [adaptive verification](adaptive_verification.md).
 
 ## Suffix splice with MTP or DFlash
 
-Single-module MTP and standard DFlash can combine model drafts with suffix
-continuations from the request history and the cross-request corpus. Every
+Single-module MTP, standard DFlash, and DFlash2 can combine model drafts with
+suffix continuations from the request history and the cross-request corpus. Every
 request still publishes one linear draft, so target verification and sampling
 semantics are unchanged.
+
+For example, Qwen3.8-27B-FP8 uses its matching DFlash2 checkpoint with seven
+speculative tokens (the checkpoint's block size is eight):
+
+```bash
+vllm serve Qwen/Qwen3.8-27B-FP8 \
+  --language-model-only \
+  --reasoning-parser qwen3 \
+  --speculative-config '{
+    "method": "dflash",
+    "model": "incoai/Qwen3.8-27B-DFlash2",
+    "num_speculative_tokens": 7,
+    "suffix_hybrid_mode": "splice",
+    "suffix_hybrid_prefix_length": 1,
+    "suffix_hybrid_min_match_length": 4
+  }'
+```
+
+The generic configuration is:
 
 ```python
 speculative_config = {

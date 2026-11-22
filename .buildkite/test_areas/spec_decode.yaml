@@ -320,6 +320,9 @@ steps:
   device: h200_35gb
   source_file_dependencies:
     - vllm/sampling_params.py
+    - vllm/config/speculative.py
+    - vllm/config/vllm.py
+    - vllm/v1/worker/gpu/model_runner.py
     - vllm/v1/spec_decode/
     - vllm/v1/worker/gpu/sample/
     - vllm/v1/worker/gpu/spec_decode/
@@ -337,6 +340,9 @@ steps:
       - image-build-amd
       source_file_dependencies:
       - vllm/sampling_params.py
+      - vllm/config/speculative.py
+      - vllm/config/vllm.py
+      - vllm/v1/worker/gpu/model_runner.py
       - vllm/v1/spec_decode/
       - vllm/v1/worker/gpu/sample/
       - vllm/v1/worker/gpu/spec_decode/

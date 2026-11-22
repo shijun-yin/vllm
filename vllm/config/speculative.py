@@ -1548,6 +1548,9 @@ class SpeculativeConfig:
             from vllm.v1.worker.gpu.spec_decode.dflash.config import (
                 DFlashSpeculatorConfig,
             )
+            from vllm.v1.worker.gpu.spec_decode.dflash2.config import (
+                DFlash2SpeculatorConfig,
+            )
             from vllm.v1.worker.gpu.spec_decode.mtp.config import (
                 MTPSpeculatorConfig,
             )
@@ -1555,10 +1558,11 @@ class SpeculativeConfig:
             if self.custom_method is not None or config_cls not in (
                 MTPSpeculatorConfig,
                 DFlashSpeculatorConfig,
+                DFlash2SpeculatorConfig,
             ):
                 raise ValueError(
-                    "Suffix splice supports only built-in single-module MTP and "
-                    "standard DFlash."
+                    "Suffix splice supports only built-in single-module MTP, "
+                    "standard DFlash, and DFlash2."
                 )
             if self.method == "mtp" and self.use_multi_module_mtp():
                 raise ValueError("Suffix splice decoding supports single-module MTP.")
