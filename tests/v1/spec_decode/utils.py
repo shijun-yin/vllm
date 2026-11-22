@@ -28,7 +28,9 @@ def fake_speculative_config(
     that aren't fields are taken from the speculator config, like
     SpeculativeConfig's shortcuts to its properties.
     """
-    spec = _FakeSpeculativeConfig(**{"custom_method": None, **fields})
+    spec = _FakeSpeculativeConfig(
+        **{"custom_method": None, "suffix_hybrid_mode": "off", **fields}
+    )
     if speculator_config_cls is None:
         probe = SimpleNamespace(
             method=fields["method"],

@@ -124,7 +124,7 @@ def _suffix_local_scan_kernel(
         tail_tok = tl.where(
             from_prefix,
             tail_tok,
-            tl.load(row + tail_pos, mask=tail_pos >= 0, other=-2),
+            tl.load(row + tail_pos, mask=(~from_prefix) & (tail_pos >= 0), other=-2),
         )
         src_pos = pos - 1 - t
         ok = active & (src_pos >= 0) & (tail_pos >= 0)

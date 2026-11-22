@@ -1441,7 +1441,7 @@ class VllmConfig:
             speculative_config = self.speculative_config
             if speculative_config.suffix_hybrid_mode != "off":
                 raise ValueError(
-                    "Suffix hybrid decoding does not support watermarking."
+                    "Suffix splice decoding does not support watermarking."
                 )
             if speculative_config.draft_sample_method != "probabilistic":
                 raise ValueError(

@@ -5,6 +5,7 @@ import math
 
 import pytest
 
+from tests.models.utils import check_logprobs_close
 from tests.utils import single_gpu_only
 from vllm import SamplingParams
 from vllm.config import CompilationConfig
@@ -203,3 +204,75 @@ def test_ngram_verification_applies_logit_bias_and_min_p(
         unfiltered, _ = generate(prompts, SamplingParams(**stochastic))
         num_unfiltered_below = num_below_min_p(unfiltered)
         assert num_unfiltered_below > 0
+
+
+@single_gpu_only
+def test_suffix_splice_mtp_llm_correctness(vllm_runner):
+    model = "Qwen/Qwen3.5-0.8B-Base"
+    prompts = [
+        (
+            "Repeat this exact sentence three times: The quick brown fox jumps over "
+            "the lazy dog."
+        ),
+        "Write a haiku about rain.",
+    ]
+    common = dict(
+        block_size=None,
+        max_model_len=1024,
+        enable_chunked_prefill=None,
+        enable_prefix_caching=False,
+        compilation_config=CompilationConfig(),
+        limit_mm_per_prompt={"image": 0, "video": 0},
+    )
+
+    def generate(runner):
+        return runner.generate_greedy_logprobs(prompts, max_tokens=48, num_logprobs=5)
+
+    with vllm_runner(model, **common) as runner:
+        expected = generate(runner)
+
+    with vllm_runner(
+        model,
+        speculative_config={
+            "method": "mtp",
+            "num_speculative_tokens": 3,
+            "suffix_hybrid_mode": "splice",
+            "suffix_hybrid_min_match_length": 2,
+            "suffix_decoding_max_tree_depth": 8,
+            "suffix_decoding_corpus_tokens": 65536,
+        },
+        disable_log_stats=False,
+        **common,
+    ) as runner:
+        cold = generate(runner)
+        cold_metrics = runner.llm.get_metrics()
+        cold_drafts = get_spec_decode_metric_value(
+            cold_metrics, "vllm:spec_decode_num_drafts"
+        )
+        cold_accepted = get_spec_decode_metric_value(
+            cold_metrics, "vllm:spec_decode_num_accepted_tokens"
+        )
+        hot = generate(runner)
+        hot_metrics = runner.llm.get_metrics()
+
+    check_logprobs_close(
+        outputs_0_lst=expected,
+        outputs_1_lst=cold,
+        name_0="target",
+        name_1="splice-cold",
+    )
+    check_logprobs_close(
+        outputs_0_lst=expected,
+        outputs_1_lst=hot,
+        name_0="target",
+        name_1="splice-hot",
+    )
+    hot_drafts = get_spec_decode_metric_value(
+        hot_metrics, "vllm:spec_decode_num_drafts"
+    )
+    hot_accepted = get_spec_decode_metric_value(
+        hot_metrics, "vllm:spec_decode_num_accepted_tokens"
+    )
+    cold_rate = cold_accepted / cold_drafts
+    hot_rate = (hot_accepted - cold_accepted) / (hot_drafts - cold_drafts)
+    assert hot_rate > cold_rate

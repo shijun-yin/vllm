@@ -16,7 +16,7 @@ vLLM supports a variety of methods of speculative decoding. Model-based methods 
 - [Draft Model](draft_model.md)
 - [N-Gram](n_gram.md)
 - [Suffix Decoding](suffix.md)
-- [Suffix hybrid with MTP or DFlash](#suffix-hybrid-with-mtp-or-dflash)
+- [Suffix splice with MTP or DFlash](#suffix-splice-with-mtp-or-dflash)
 - [Hidden State Extraction](extract_hidden_states.md)
 - [Custom Speculators (Experimental)](#custom-speculators-experimental)
 - [Dynamic Speculative Decoding](dynamic_speculative_decoding.md)
@@ -91,18 +91,20 @@ historical tail, so acceptance feedback is attributed to the model chain.
 
 Acceptance statistics are indexed by source, match-length bucket, and absolute
 draft position. Set `suffix_hybrid_min_expected_accepted` to add an expected
-acceptance threshold after the statistics mature. Set
-`suffix_hybrid_diagnostics` to `true` to retain the last 16 routing decisions
-and drafter graph sizes for debugging; keep it disabled for performance
-measurements.
+acceptance threshold after the statistics mature.
 
 Splice requires greedy drafting and standard verification. It does not support
 adaptive verification, `prefill_context_kv_only`, watermarking, DBO, or
 microbatching. The prefix must be positive and smaller than
-`num_speculative_tokens`.
+`num_speculative_tokens`. The minimum match length must be positive and no
+greater than `suffix_decoding_max_tree_depth`. The expected acceptance threshold
+must be between zero and `num_speculative_tokens`, inclusive.
 
-The corpus and seeded-sampling limitations are the same as for
-[suffix decoding](suffix.md). Splice also retains a dense GPU token history, so
+The corpus limitations are the same as for [suffix decoding](suffix.md). Splice
+also uses process-wide acceptance statistics for routing, so seeded sampling is
+not guaranteed to be reproducible across unrelated traffic even when
+`suffix_decoding_corpus_tokens=0`; that setting disables token-corpus sharing,
+not routing-statistic sharing. Splice retains a dense GPU token history, so
 account for `max_num_seqs * max_model_len * 4` bytes in addition to the corpus
 and lookup scratch space.
 

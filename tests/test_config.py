@@ -1333,6 +1333,24 @@ def test_suffix_hybrid_requires_model_drafter():
         SpeculativeConfig(method="suffix", suffix_hybrid_mode="splice")
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("suffix_decoding_max_tree_depth", 0, "must be >= 1"),
+        ("suffix_decoding_corpus_tokens", -1, "must be in"),
+        ("suffix_decoding_corpus_tokens", 1 << 31, "must be in"),
+        ("suffix_decoding_max_cached_requests", -1, "must be >= 0"),
+    ],
+)
+def test_suffix_hybrid_validates_suffix_limits(field, value, match):
+    with pytest.raises(ValueError, match=match):
+        SpeculativeConfig(
+            method="suffix",
+            suffix_hybrid_mode="splice",
+            **{field: value},
+        )
+
+
 def test_model_runner_supports_custom_logits_processors():
     config = VllmConfig()
     config.model_config = cast(
@@ -5036,6 +5054,15 @@ def _watermarked_vllm_config() -> VllmConfig:
     config.attention_config = AttentionConfig()
     config.speculative_config = None
     return config
+
+
+def test_suffix_splice_rejects_watermarking():
+    config = _watermarked_vllm_config()
+    config.speculative_config = fake_speculative_config(
+        method="mtp", suffix_hybrid_mode="splice"
+    )
+    with pytest.raises(ValueError, match="does not support watermarking"):
+        config._check_supports_watermarking()
 
 
 def test_target_only_gumbel_allows_speculative_decoding(caplog_vllm, disable_log_dedup):

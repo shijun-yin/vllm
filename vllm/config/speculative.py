@@ -617,17 +617,14 @@ class SpeculativeConfig:
     prefix and selects a suffix tail on the GPU."""
 
     suffix_hybrid_min_match_length: int = 4
-    """Minimum context match length for a hybrid suffix candidate."""
+    """Minimum context match length, in `[1, suffix_decoding_max_tree_depth]`."""
 
     suffix_hybrid_prefix_length: int = 1
     """Number of model draft tokens retained before a splice lookup."""
 
     suffix_hybrid_min_expected_accepted: float | None = None
-    """Optional minimum expected accepted draft tokens for suffix routing."""
-
-    suffix_hybrid_diagnostics: bool = False
-    """Whether to retain the last 16 routing decisions and drafter graph sizes.
-    Enable for debugging only; recording them adds GPU work to every draft step."""
+    """Optional minimum expected accepted draft tokens, in
+    `[0, num_speculative_tokens]`."""
 
     draft_load_config: LoadConfig | None = None
     """Load config for the draft model. If not specified, will use the load
@@ -783,7 +780,6 @@ class SpeculativeConfig:
             "suffix_hybrid_min_match_length",
             "suffix_hybrid_prefix_length",
             "suffix_hybrid_min_expected_accepted",
-            "suffix_hybrid_diagnostics",
             "draft_load_config",
             "rejection_sample_method",
             "synthetic_acceptance_rates",
@@ -1540,21 +1536,41 @@ class SpeculativeConfig:
             )
 
         if self.suffix_hybrid_mode != "off":
+            from vllm.v1.worker.gpu.spec_decode.suffix.config import (
+                validate_suffix_decoding_parameters,
+            )
+
+            validate_suffix_decoding_parameters(self)
             if self.method not in ("mtp", "dflash"):
                 raise ValueError(
-                    "Suffix hybrid decoding requires method='mtp' or 'dflash'."
+                    "Suffix splice decoding requires method='mtp' or 'dflash'."
+                )
+            from vllm.v1.worker.gpu.spec_decode.dflash.config import (
+                DFlashSpeculatorConfig,
+            )
+            from vllm.v1.worker.gpu.spec_decode.mtp.config import (
+                MTPSpeculatorConfig,
+            )
+
+            if self.custom_method is not None or config_cls not in (
+                MTPSpeculatorConfig,
+                DFlashSpeculatorConfig,
+            ):
+                raise ValueError(
+                    "Suffix splice supports only built-in single-module MTP and "
+                    "standard DFlash."
                 )
             if self.method == "mtp" and self.use_multi_module_mtp():
-                raise ValueError("Suffix hybrid decoding supports single-module MTP.")
+                raise ValueError("Suffix splice decoding supports single-module MTP.")
             if self.draft_sample_method != "greedy":
-                raise ValueError("Suffix hybrid decoding requires greedy drafting.")
+                raise ValueError("Suffix splice decoding requires greedy drafting.")
             if self.rejection_sample_method != "standard":
                 raise ValueError(
-                    "Suffix hybrid decoding requires standard target verification."
+                    "Suffix splice decoding requires standard target verification."
                 )
             if self.enable_adaptive_verification or self.prefill_context_kv_only:
                 raise ValueError(
-                    "Suffix hybrid decoding does not support adaptive verification "
+                    "Suffix splice decoding does not support adaptive verification "
                     "or prefill_context_kv_only."
                 )
             if (
@@ -1584,7 +1600,7 @@ class SpeculativeConfig:
             parallel = self.target_parallel_config
             if parallel is not None and parallel.use_ubatching:
                 raise ValueError(
-                    "Suffix hybrid decoding does not support DBO or microbatching."
+                    "Suffix splice decoding does not support DBO or microbatching."
                 )
 
         return self

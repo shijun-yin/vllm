@@ -202,7 +202,7 @@ def _hybrid_observe_kernel(
     k = tl.arange(0, K_PO2)
     observed = (k < K) & (k < valid) & (k <= accepted_count) & (k < verified)
     accepted = k < accepted_count
-    source = tl.load(last_sources_ptr + req * K + k)
+    source = tl.load(last_sources_ptr + req * K + k, mask=observed, other=0)
     model_stat = model_stats_ptr + k * 2
     suffix_stat = suffix_stats_ptr + (bucket * K + k) * 2
     is_model = source == 0
@@ -232,7 +232,6 @@ class HybridSpeculator(DraftModelSpeculator):
         self.prefix_len = spec.suffix_hybrid_prefix_length
         self.min_match = spec.suffix_hybrid_min_match_length
         self.min_expected = spec.suffix_hybrid_min_expected_accepted
-        self.diagnostics = spec.suffix_hybrid_diagnostics
         self.max_num_reqs = self.suffix.max_num_reqs
         self.num_speculative_steps = spec.num_speculative_tokens
         self.num_query_per_req = drafter.num_query_per_req
@@ -270,16 +269,6 @@ class HybridSpeculator(DraftModelSpeculator):
             device=device,
         )
         self.num_steps = 0
-        self.last_num_reqs = 0
-        self.last_k = 0
-        self.route_history = torch.zeros(
-            (16, self.max_num_reqs), dtype=torch.bool, device=device
-        )
-        self.route_k_history = torch.zeros(16, dtype=torch.int32, device=device)
-        self.route_n_history = torch.zeros(16, dtype=torch.int32, device=device)
-        self.draft_req_history = torch.zeros(16, dtype=torch.int32, device=device)
-        self.draft_graph_history = torch.zeros(16, dtype=torch.int32, device=device)
-        self.route_count = 0
 
     def __getattr__(self, name: str) -> Any:
         if name in {"drafter", "suffix"}:
@@ -347,7 +336,6 @@ class HybridSpeculator(DraftModelSpeculator):
         self.last_buckets.fill_(-1)
         self.last_valid.zero_()
         self.num_steps = 0
-        self.route_count = 0
 
     def prepare_propose(
         self,
@@ -434,23 +422,7 @@ class HybridSpeculator(DraftModelSpeculator):
             K_PO2=triton.next_power_of_2(k),
             PREFIX=self.prefix_len,
         )
-        n = input_batch.num_reqs
-        if self.diagnostics:
-            slot = self.route_count % 16
-            self.route_history[slot].zero_()
-            self.route_history[slot, :n] = self.use_suffix[:n]
-            self.route_k_history[slot] = k
-            self.route_n_history[slot] = n
-            draft_num = getattr(self.drafter, "last_draft_num_reqs", None)
-            if draft_num is None:
-                draft_num = getattr(self.drafter, "last_query_num_reqs", 0)
-            graph_num = getattr(self.drafter, "last_draft_graph_reqs", None)
-            if graph_num is None:
-                graph_num = getattr(self.drafter, "last_query_graph_reqs", 0)
-            self.draft_req_history[slot] = draft_num
-            self.draft_graph_history[slot] = graph_num
-        self.route_count += 1
-        return self.output_drafts[:n]
+        return self.output_drafts[: input_batch.num_reqs]
 
     @torch.inference_mode()
     def propose(
@@ -496,8 +468,6 @@ class HybridSpeculator(DraftModelSpeculator):
             if num_speculative_tokens is None
             else num_speculative_tokens
         )
-        self.last_num_reqs = input_batch.num_reqs
-        self.last_k = k
         if dummy_run or k == 0 or self.mode == "off":
             model_drafts = self.drafter.propose(**kwargs, num_speculative_tokens=k)
             if not dummy_run and k == 0:

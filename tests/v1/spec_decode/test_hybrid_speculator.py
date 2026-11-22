@@ -1,15 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
-from types import SimpleNamespace
-
-import numpy as np
 import pytest
 import torch
 
 from vllm.platforms import current_platform
-from vllm.v1.worker.gpu.spec_decode.hybrid.speculator import HybridSpeculator
-from vllm.v1.worker.gpu.spec_decode.speculator import DraftModelSpeculator
+from vllm.v1.worker.gpu.spec_decode.hybrid.speculator import (
+    _hybrid_observe_kernel,
+    _hybrid_publish_kernel,
+    _hybrid_route_kernel,
+)
+from vllm.v1.worker.gpu.spec_decode.suffix.speculator import (
+    _BUCKET_SLOTS,
+    _HASH_MUL,
+    _INGEST_BLOCK,
+    _suffix_finalize_kernel,
+    _suffix_ingest_kernel,
+    _suffix_local_scan_kernel,
+)
 
 if not current_platform.is_cuda():
     pytest.skip("requires CUDA", allow_module_level=True)
@@ -17,324 +25,299 @@ if not current_platform.is_cuda():
 DEVICE = torch.device("cuda")
 
 
-class _DummyDrafter(DraftModelSpeculator):
-    def __init__(self):
-        self.num_query_per_req = 1
-        self.draft_logits = None
-        self.supports_mm_inputs = False
-        self.pcp_manager = None
+def test_splice_route_maturity_prefix_and_identical_tail():
+    k = 3
+    prefix = 1
+    model = torch.tensor([[100, 101, 102]], dtype=torch.int64, device=DEVICE)
+    suffix = torch.tensor([[1000, 1001]], dtype=torch.int64, device=DEVICE)
+    num_valid = torch.tensor([2], dtype=torch.int32, device=DEVICE)
+    match_lens = torch.tensor([4], dtype=torch.int32, device=DEVICE)
+    sources = torch.zeros(1, dtype=torch.int32, device=DEVICE)
+    model_stats = torch.zeros((k, 2), dtype=torch.int64, device=DEVICE)
+    suffix_stats = torch.zeros((18, k, 2), dtype=torch.int64, device=DEVICE)
+    use_suffix = torch.zeros(1, dtype=torch.bool, device=DEVICE)
+    scores = torch.zeros((1, 2), dtype=torch.float32, device=DEVICE)
 
-    def init_cudagraph_manager(self, cudagraph_mode) -> None:
-        return
-
-    def capture(self) -> None:
-        return
-
-    def load_draft_model(self, target_model, target_attn_layer_names):
-        raise NotImplementedError
-
-    def propose(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def prepare_propose(self, *args) -> None:
-        return
-
-
-def _request_state(max_reqs: int, max_len: int):
-    def buf(*shape):
-        return SimpleNamespace(
-            gpu=torch.zeros(*shape, dtype=torch.int32, device=DEVICE)
+    def route():
+        _hybrid_route_kernel[(1,)](
+            num_valid,
+            match_lens,
+            sources,
+            model,
+            model.stride(0),
+            suffix,
+            suffix.stride(0),
+            model_stats,
+            suffix_stats,
+            use_suffix,
+            scores,
+            MIN_MATCH=4,
+            K=k,
+            STATS_K=k,
+            K_PO2=4,
+            PREFIX=prefix,
+            QUALITY_GATE=False,
+            MIN_EXPECTED=0.0,
         )
+        return use_suffix.item()
 
-    return SimpleNamespace(
-        all_token_ids=buf(max_reqs, max_len),
-        total_len=buf(max_reqs),
-        prompt_len=SimpleNamespace(np=np.zeros(max_reqs, dtype=np.int32)),
-        req_id_to_index={},
-    )
+    assert route()
+    suffix_stats[3, :, 0] = 8
+    suffix_stats[3, :, 1] = 8
+    assert not route()
+    model_stats[:, 1] = 8
+    assert route()
+    model_stats[:, 0] = 8
+    assert not route()
 
-
-def _make_hybrid(
-    mode="splice", max_k=4, min_expected=None, corpus_tokens=0, min_match=4
-):
-    spec = SimpleNamespace(
-        num_speculative_tokens=max_k,
-        suffix_decoding_max_tree_depth=8,
-        suffix_decoding_corpus_tokens=corpus_tokens,
-        suffix_decoding_max_cached_requests=100,
-        enable_adaptive_verification=False,
-        suffix_hybrid_mode=mode,
-        suffix_hybrid_prefix_length=1,
-        suffix_hybrid_min_match_length=min_match,
-        suffix_hybrid_min_expected_accepted=min_expected,
-        suffix_hybrid_diagnostics=False,
-    )
-    cfg = SimpleNamespace(
-        speculative_config=spec,
-        scheduler_config=SimpleNamespace(max_num_seqs=4),
-        model_config=SimpleNamespace(max_model_len=64),
-    )
-    req_states = _request_state(4, 64)
-    return HybridSpeculator(cfg, DEVICE, req_states, _DummyDrafter()), req_states
-
-
-def _batch(n=1):
-    return SimpleNamespace(
-        num_reqs=n,
-        idx_mapping=torch.arange(n, dtype=torch.int64, device=DEVICE),
-        has_structured_output_reqs=False,
-    )
-
-
-def _stats(hybrid, bucket, accepted, observed):
-    hybrid.suffix_stats[bucket, :, 0] = accepted
-    hybrid.suffix_stats[bucket, :, 1] = observed
-
-
-def test_route_diagnostics_are_opt_in():
-    hybrid, _ = _make_hybrid()
-    batch = _batch(1)
-    model = torch.zeros((1, 4), dtype=torch.int64, device=DEVICE)
-    hybrid.suffix.drafts[0, :2] = 1
-    hybrid.suffix.num_valid[0] = 2
-    hybrid.suffix.match_lens[0] = 4
-    sampled = torch.ones(1, dtype=torch.int32, device=DEVICE)
-    hybrid._route(3, model, sampled)
-
-    hybrid._publish(batch, model, hybrid.suffix.drafts, sampled, 3)
-    assert hybrid.route_count == 1
-    assert not hybrid.route_history.any()
-
-    hybrid.diagnostics = True
-    hybrid._publish(batch, model, hybrid.suffix.drafts, sampled, 3)
-    assert hybrid.route_count == 2
-    assert hybrid.route_history[1, 0].item()
-
-
-def test_splice_cold_start_fallback_and_prefix_rejection():
-    hybrid, _ = _make_hybrid(mode="splice")
-    batch = _batch(1)
-    model = torch.tensor([[100, 101, 102, 103]], dtype=torch.int64, device=DEVICE)
-    suffix = torch.tensor([[1000, 1001, 1002, 1003]], dtype=torch.int64, device=DEVICE)
-    hybrid.suffix.num_valid[0] = 2
-    hybrid.suffix.match_lens[0] = 4
-    hybrid.suffix.sources[0] = 0
-    sampled = torch.ones(1, dtype=torch.int32, device=DEVICE)
-
-    hybrid._route(3, model, sampled)
-    assert hybrid.use_suffix[0].item()
-    output = hybrid._publish(batch, model, suffix, sampled, 3)
-    assert output[:, :3].cpu().tolist() == [[100, 1000, 1001]]
-    assert output[0, 3].item() == -1
-    assert hybrid.last_sources[0, :3].cpu().tolist() == [0, 1, 1]
-
-    _stats(hybrid, 3, 8, 8)
-    hybrid._route(3, model, sampled)
-    assert not hybrid.use_suffix[0].item()
-
-    hybrid.model_stats[:, 0] = 0
-    hybrid.model_stats[:, 1] = 8
-    hybrid._route(3, model, sampled)
-    assert hybrid.use_suffix[0].item()
-
-    hybrid.model_stats[:, 0] = 8
-    hybrid._route(3, model, sampled)
-    assert not hybrid.use_suffix[0].item()
-
-    hybrid.suffix_stats[3, :, 1] = 0
+    suffix_stats[3, :, 1] = 0
     model[0, 0] = -1
-    hybrid._route(3, model, sampled)
-    assert not hybrid.use_suffix[0].item()
+    assert not route()
+    model[0, 0] = 100
+    suffix.copy_(model[:, 1:])
+    assert not route()
 
 
-def test_splice_identical_tail_keeps_model_attribution():
-    hybrid, _ = _make_hybrid(mode="splice")
-    model = torch.tensor([[100, 101, 102, 103]], dtype=torch.int64, device=DEVICE)
-    hybrid.suffix.drafts[0, :2] = torch.tensor([101, 102], device=DEVICE)
-    hybrid.suffix.num_valid[0] = 2
-    hybrid.suffix.match_lens[0] = 4
-    sampled = torch.ones(1, dtype=torch.int32, device=DEVICE)
+@pytest.mark.parametrize(
+    ("k", "stats_k"),
+    [(3, 3), (5, 5), (15, 15), (3, 5)],
+    ids=["k3", "k5", "k15", "dynamic-k3-of-5"],
+)
+def test_splice_publish_and_observe_last_slot(k, stats_k):
+    model = torch.arange(k, dtype=torch.int64, device=DEVICE).unsqueeze(0) + 100
+    suffix = torch.arange(k - 1, dtype=torch.int64, device=DEVICE).unsqueeze(0) + 1000
+    use_suffix = torch.ones(1, dtype=torch.bool, device=DEVICE)
+    sources = torch.zeros(1, dtype=torch.int32, device=DEVICE)
+    match_lens = torch.tensor([4], dtype=torch.int32, device=DEVICE)
+    idx_mapping = torch.zeros(1, dtype=torch.int64, device=DEVICE)
+    num_sampled = torch.ones(1, dtype=torch.int32, device=DEVICE)
+    output = torch.zeros((1, k), dtype=torch.int64, device=DEVICE)
+    last_sources = torch.full((1, stats_k), -1, dtype=torch.int32, device=DEVICE)
+    last_buckets = torch.full((1,), -1, dtype=torch.int32, device=DEVICE)
+    last_valid = torch.zeros(1, dtype=torch.int32, device=DEVICE)
+    _hybrid_publish_kernel[(1,)](
+        model,
+        model.stride(0),
+        suffix,
+        suffix.stride(0),
+        use_suffix,
+        sources,
+        match_lens,
+        idx_mapping,
+        num_sampled,
+        output,
+        output.stride(0),
+        last_sources,
+        last_buckets,
+        last_valid,
+        K=k,
+        STATS_K=stats_k,
+        K_PO2=1 << (k - 1).bit_length(),
+        PREFIX=1,
+    )
+    assert output[0, 0].item() == 100
+    assert output[0, 1:].cpu().tolist() == suffix[0].cpu().tolist()
+    assert last_sources[0, 0].item() == 0
+    assert (last_sources[0, 1:k] == 1).all()
+    assert last_valid.item() == k
 
-    hybrid._route(3, model, sampled)
-
-    assert not hybrid.use_suffix[0].item()
-    output = hybrid._publish(_batch(1), model, hybrid.suffix.drafts, sampled, 3)
-    assert output[0, :3].cpu().tolist() == [100, 101, 102]
-    assert hybrid.last_sources[0, :3].cpu().tolist() == [0, 0, 0]
-
-
-def test_observation_attributes_splice_prefix_and_reached_tail():
-    hybrid, _ = _make_hybrid()
-    model = torch.tensor([[100, 101, 102, 103]], dtype=torch.int64, device=DEVICE)
-    hybrid.suffix.drafts[0, :2] = torch.tensor([200, 201], device=DEVICE)
-    hybrid.suffix.num_valid[0] = 2
-    hybrid.suffix.match_lens[0] = 4
-    sampled = torch.ones(1, dtype=torch.int32, device=DEVICE)
-    hybrid._route(3, model, sampled)
-    hybrid._publish(_batch(1), model, hybrid.suffix.drafts, sampled, 3)
-
-    hybrid.prepare_propose(
-        _batch(1),
+    model_stats = torch.zeros((stats_k, 2), dtype=torch.int64, device=DEVICE)
+    suffix_stats = torch.zeros((18, stats_k, 2), dtype=torch.int64, device=DEVICE)
+    _hybrid_observe_kernel[(1,)](
+        idx_mapping,
         torch.tensor([2], dtype=torch.int32, device=DEVICE),
         torch.tensor([1], dtype=torch.int32, device=DEVICE),
-        None,
+        model_stats,
+        suffix_stats,
+        last_sources,
+        last_buckets,
+        last_valid,
+        K=stats_k,
+        K_PO2=1 << (stats_k - 1).bit_length(),
     )
-
-    assert hybrid.model_stats[:, :2].cpu().tolist() == [
-        [1, 1],
-        [0, 0],
-        [0, 0],
-        [0, 0],
-    ]
-    assert hybrid.suffix_stats[3, :3].cpu().tolist() == [
-        [0, 0],
-        [0, 1],
-        [0, 0],
-    ]
-    assert hybrid.last_valid[0].item() == 0
+    assert model_stats[0].cpu().tolist() == [1, 1]
+    assert model_stats[1:].sum().item() == 0
+    assert suffix_stats[3, 1].cpu().tolist() == [0, 1]
+    expected_suffix_observations = 1
+    assert suffix_stats.sum().item() == expected_suffix_observations
+    assert last_valid.item() == 0
 
 
-def test_structured_output_discards_pending_observation():
-    hybrid, _ = _make_hybrid()
-    batch = _batch(1)
-    hybrid.last_valid[0] = 3
-    batch.has_structured_output_reqs = True
-    hybrid.prepare_propose(
-        batch,
-        torch.tensor([2], dtype=torch.int32, device=DEVICE),
-        torch.tensor([1], dtype=torch.int32, device=DEVICE),
-        None,
+def run_suffix_query(history, num_tokens, prefix=(), docs=(), min_match=4, max_len=64):
+    max_reqs = 1
+    block_l = (
+        256
+        if max_len >= 1024
+        else 128
+        if max_len >= 256
+        else max(16, 1 << (max_len - 1).bit_length())
     )
-    assert hybrid.last_valid[0].item() == 0
-    assert hybrid.model_stats.sum().item() == 0
-    assert hybrid.suffix_stats.sum().item() == 0
+    n_blocks = (max_len + block_l - 1) // block_l
+    token_ids = torch.zeros((max_reqs, max_len), dtype=torch.int32, device=DEVICE)
+    total_len = torch.zeros(max_reqs, dtype=torch.int32, device=DEVICE)
+    idx_mapping = torch.zeros(max_reqs, dtype=torch.int64, device=DEVICE)
+    num_sampled = torch.ones(max_reqs, dtype=torch.int32, device=DEVICE)
+    corpus_len = 1024 if docs else 1
+    corpus = torch.full((corpus_len,), -1, dtype=torch.int32, device=DEVICE)
+    num_buckets = 1 << (max(16, corpus_len // 4) - 1).bit_length()
+    table = torch.full(
+        (2, num_buckets, _BUCKET_SLOTS), -1, dtype=torch.int64, device=DEVICE
+    )
+    corpus_head = torch.zeros(1, dtype=torch.int64, device=DEVICE)
+    doc_seq = torch.zeros(1, dtype=torch.int64, device=DEVICE)
+    ingest_out = torch.zeros(2, dtype=torch.int64, device=DEVICE)
+    for doc in docs:
+        token_ids.zero_()
+        token_ids[0, : len(doc)] = torch.tensor(doc, dtype=torch.int32, device=DEVICE)
+        total_len[0] = len(doc)
+        docs_gpu = torch.tensor([0, 0], dtype=torch.int32, device=DEVICE)
+        _suffix_ingest_kernel[(1, (max_len + _INGEST_BLOCK - 1) // _INGEST_BLOCK)](
+            token_ids,
+            token_ids.stride(0),
+            docs_gpu,
+            1,
+            total_len,
+            corpus,
+            corpus_len,
+            corpus_head,
+            doc_seq,
+            ingest_out[0:1],
+            ingest_out[1:2],
+            table,
+            HASH_MUL=_HASH_MUL,
+            NUM_BUCKETS=num_buckets,
+            SLOTS=_BUCKET_SLOTS,
+            BLOCK=_INGEST_BLOCK,
+            num_warps=4,
+        )
+        corpus_head.copy_(ingest_out[0:1])
+        doc_seq.copy_(ingest_out[1:2])
+
+    token_ids.zero_()
+    token_ids[0, : len(history)] = torch.tensor(
+        history, dtype=torch.int32, device=DEVICE
+    )
+    total_len[0] = len(history)
+    before = token_ids.clone()
+    last_sampled = torch.full(
+        (max_reqs,), history[-1], dtype=torch.int64, device=DEVICE
+    )
+    query_prefix = torch.zeros(
+        (max_reqs, max(1, len(prefix))), dtype=torch.int64, device=DEVICE
+    )
+    if prefix:
+        query_prefix[0, : len(prefix)] = torch.tensor(
+            prefix, dtype=torch.int64, device=DEVICE
+        )
+    scratch = torch.zeros((max_reqs, n_blocks), dtype=torch.int64, device=DEVICE)
+    drafts = torch.zeros((max_reqs, num_tokens), dtype=torch.int64, device=DEVICE)
+    num_valid = torch.zeros(max_reqs, dtype=torch.int32, device=DEVICE)
+    match_lens = torch.zeros(max_reqs, dtype=torch.int32, device=DEVICE)
+    sources = torch.zeros(max_reqs, dtype=torch.int32, device=DEVICE)
+    accept_stats = torch.zeros((18, num_tokens, 2), dtype=torch.int64, device=DEVICE)
+    last_bucket = torch.full((max_reqs,), -1, dtype=torch.int32, device=DEVICE)
+    last_valid = torch.zeros(max_reqs, dtype=torch.int32, device=DEVICE)
+    confidence = torch.zeros((max_reqs, num_tokens), dtype=torch.float32, device=DEVICE)
+    _suffix_local_scan_kernel[(max_reqs, n_blocks)](
+        token_ids,
+        token_ids.stride(0),
+        idx_mapping,
+        total_len,
+        num_sampled,
+        scratch,
+        scratch.stride(0),
+        query_prefix,
+        query_prefix.stride(0),
+        max_len + 1,
+        QUERY_PREFIX=len(prefix),
+        REQUIRE_FULL=True,
+        K=num_tokens,
+        MAX_DEPTH=8,
+        BLOCK=block_l,
+        num_warps=4,
+    )
+    _suffix_finalize_kernel[(max_reqs,)](
+        token_ids,
+        token_ids.stride(0),
+        idx_mapping,
+        total_len,
+        num_sampled,
+        last_sampled,
+        scratch,
+        scratch.stride(0),
+        n_blocks,
+        max_len + 1,
+        corpus,
+        corpus_len,
+        table,
+        drafts,
+        drafts.stride(0),
+        num_valid,
+        match_lens,
+        sources,
+        accept_stats,
+        last_bucket,
+        last_valid,
+        confidence,
+        query_prefix,
+        query_prefix.stride(0),
+        QUERY_PREFIX=len(prefix),
+        HAS_CORPUS=bool(docs),
+        ADAPTIVE=False,
+        REQUIRE_FULL=True,
+        MIN_MATCH=min_match,
+        HASH_MUL=_HASH_MUL,
+        NUM_BUCKETS=num_buckets,
+        SLOTS=_BUCKET_SLOTS,
+        MAX_DEPTH=8,
+        DEPTH_PO2=8,
+        K=num_tokens,
+        K_PO2=1 << (num_tokens - 1).bit_length(),
+        NB_PO2=1 << (n_blocks - 1).bit_length(),
+        num_warps=4,
+    )
+    assert torch.equal(token_ids, before)
+    return (
+        drafts[0].cpu().tolist(),
+        num_valid.item(),
+        match_lens.item(),
+    )
 
 
 def test_splice_lookup_changes_continuation_without_mutating_history():
-    hybrid, req_states = _make_hybrid(mode="splice")
-    history = torch.tensor(
-        [1, 2, 3, 7, 8, 1, 2, 4, 9, 1, 2], dtype=torch.int32, device=DEVICE
-    )
-    req_states.all_token_ids.gpu[0, : len(history)] = history
-    req_states.total_len.gpu[0] = len(history)
-    before = req_states.all_token_ids.gpu.clone()
-    batch = _batch(1)
-    sampled = torch.tensor([1], dtype=torch.int32, device=DEVICE)
-    last_sampled = torch.tensor([[2]], dtype=torch.int64, device=DEVICE)
-
-    baseline, baseline_valid, _, _ = hybrid.suffix.propose_hybrid(
-        batch, sampled, last_sampled, 3
-    )
-    baseline = baseline.clone()
-    baseline_valid = baseline_valid.clone()
-    prefix = torch.tensor([[3, 0, 0, 0]], dtype=torch.int64, device=DEVICE)
-    spliced, spliced_valid, _, _ = hybrid.suffix.propose_hybrid(
-        batch, sampled, last_sampled, 2, query_prefix=prefix, prefix_len=1
-    )
-    assert baseline_valid.item() == 3
-    assert baseline[0].cpu().tolist() == [4, 9, 1]
-    assert spliced_valid.item() == 2
-    assert spliced[0].cpu().tolist() == [7, 8]
-    assert torch.equal(req_states.all_token_ids.gpu, before)
+    history = [1, 2, 3, 7, 8, 1, 2, 4, 9, 1, 2]
+    assert run_suffix_query(history, 3, min_match=2) == ([4, 9, 1], 3, 2)
+    assert run_suffix_query(history, 2, prefix=[3], min_match=2) == ([7, 8], 2, 3)
 
 
-def test_splice_lookup_ignores_longer_match_without_full_tail():
-    hybrid, req_states = _make_hybrid(mode="splice")
-    history = torch.tensor([0, 1, 0, 1, 0], dtype=torch.int32, device=DEVICE)
-    req_states.all_token_ids.gpu[0, : len(history)] = history
-    req_states.total_len.gpu[0] = len(history)
-    prefix = torch.tensor([[1, 0, 0, 0]], dtype=torch.int64, device=DEVICE)
-
-    draft, num_valid, match_len, _ = hybrid.suffix.propose_hybrid(
-        _batch(1),
-        torch.ones(1, dtype=torch.int32, device=DEVICE),
-        torch.zeros(1, dtype=torch.int64, device=DEVICE),
+def test_splice_lookup_requires_full_tail():
+    assert run_suffix_query([0, 1, 0, 1, 0], 2, prefix=[1], min_match=2) == (
+        [0, 1],
         2,
-        query_prefix=prefix,
-        prefix_len=1,
+        2,
     )
 
-    assert num_valid.item() == 2
-    assert match_len.item() == 2
-    assert draft[0].cpu().tolist() == [0, 1]
 
-
-def test_splice_corpus_ignores_partial_high_vote_chain():
-    hybrid, req_states = _make_hybrid(mode="splice", corpus_tokens=1024, min_match=2)
-    docs = [
+def test_splice_corpus_filters_partial_and_short_matches():
+    partial_docs = [
         [0, 1, 0, 1, 9],
         [8, 0, 1, 20, 21],
         [8, 0, 1, 30, 31],
         [8, 0, 1, 40, 41],
     ]
-    for i, doc in enumerate(docs):
-        req_states.all_token_ids.gpu[0].zero_()
-        req_states.all_token_ids.gpu[0, : len(doc)] = torch.tensor(
-            doc, dtype=torch.int32, device=DEVICE
-        )
-        req_states.total_len.gpu[0] = len(doc)
-        req_states.req_id_to_index[f"doc-{i}"] = 0
-        hybrid.suffix.on_requests_finished([f"doc-{i}"])
-
-    history = [5, 0, 1, 0]
-    req_states.all_token_ids.gpu[0].zero_()
-    req_states.all_token_ids.gpu[0, : len(history)] = torch.tensor(
-        history, dtype=torch.int32, device=DEVICE
-    )
-    req_states.total_len.gpu[0] = len(history)
-    prefix = torch.tensor([[1, 0, 0, 0]], dtype=torch.int64, device=DEVICE)
-
-    draft, num_valid, match_len, _ = hybrid.suffix.propose_hybrid(
-        _batch(1),
-        torch.ones(1, dtype=torch.int32, device=DEVICE),
-        torch.zeros(1, dtype=torch.int64, device=DEVICE),
-        2,
-        query_prefix=prefix,
-        prefix_len=1,
-    )
-
-    assert num_valid.item() == 2
-    assert match_len.item() == 2
-    assert draft[0].cpu().tolist() == [40, 41]
-
-
-def test_hybrid_lookup_enforces_min_match_before_voting():
-    hybrid, req_states = _make_hybrid(mode="splice", corpus_tokens=1024)
-    docs = [
+    assert run_suffix_query(
+        [5, 0, 1, 0], 2, prefix=[1], docs=partial_docs, min_match=2
+    ) == ([40, 41], 2, 2)
+    short_match_docs = [
         [0, 1, 0, 1, 20, 21],
         [0, 1, 0, 1, 30, 31],
         [0, 1, 0, 1, 40, 41],
-        [8, 0, 1, 50, 51],
-        [8, 0, 1, 50, 51],
-        [8, 0, 1, 50, 51],
-        [8, 0, 1, 50, 51],
+        *([[8, 0, 1, 50, 51]] * 4),
     ]
-    for i, doc in enumerate(docs):
-        req_states.all_token_ids.gpu[0].zero_()
-        req_states.all_token_ids.gpu[0, : len(doc)] = torch.tensor(
-            doc, dtype=torch.int32, device=DEVICE
-        )
-        req_states.total_len.gpu[0] = len(doc)
-        req_states.req_id_to_index[f"doc-{i}"] = 0
-        hybrid.suffix.on_requests_finished([f"doc-{i}"])
+    assert run_suffix_query(
+        [5, 0, 1, 0], 2, prefix=[1], docs=short_match_docs, min_match=4
+    ) == ([40, 41], 2, 4)
 
-    history = [5, 0, 1, 0]
-    req_states.all_token_ids.gpu[0].zero_()
-    req_states.all_token_ids.gpu[0, : len(history)] = torch.tensor(
-        history, dtype=torch.int32, device=DEVICE
-    )
-    req_states.total_len.gpu[0] = len(history)
-    prefix = torch.tensor([[1, 0, 0, 0]], dtype=torch.int64, device=DEVICE)
 
-    draft, num_valid, match_len, _ = hybrid.suffix.propose_hybrid(
-        _batch(1),
-        torch.ones(1, dtype=torch.int32, device=DEVICE),
-        torch.zeros(1, dtype=torch.int64, device=DEVICE),
-        2,
-        query_prefix=prefix,
-        prefix_len=1,
-    )
-
-    assert num_valid.item() == 2
-    assert match_len.item() == 4
-    assert draft[0].cpu().tolist() == [40, 41]
+def test_splice_prefix_does_not_read_past_history_allocation():
+    run_suffix_query([1, 2, 3, 4, 5, 6, 7, 8], 2, prefix=[9, 10], max_len=8)

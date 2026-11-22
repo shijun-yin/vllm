@@ -11,6 +11,24 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
+def validate_suffix_decoding_parameters(spec: "SpeculativeConfig") -> None:
+    if spec.suffix_decoding_max_tree_depth < 1:
+        raise ValueError(
+            f"suffix_decoding_max_tree_depth="
+            f"{spec.suffix_decoding_max_tree_depth} must be >= 1"
+        )
+    if not 0 <= spec.suffix_decoding_corpus_tokens < (1 << 31):
+        raise ValueError(
+            f"suffix_decoding_corpus_tokens="
+            f"{spec.suffix_decoding_corpus_tokens} must be in [0, 2**31)"
+        )
+    if spec.suffix_decoding_max_cached_requests < 0:
+        raise ValueError(
+            f"suffix_decoding_max_cached_requests="
+            f"{spec.suffix_decoding_max_cached_requests} must be >= 0"
+        )
+
+
 class SuffixSpeculatorConfig(SpeculatorConfig):
     base_method = "suffix"
     speculator_class = (
@@ -30,19 +48,4 @@ class SuffixSpeculatorConfig(SpeculatorConfig):
                 "Defaulted num_speculative_tokens to %s for suffix decoding.",
                 spec.num_speculative_tokens,
             )
-        # Validate values
-        if spec.suffix_decoding_max_tree_depth < 1:
-            raise ValueError(
-                f"suffix_decoding_max_tree_depth="
-                f"{spec.suffix_decoding_max_tree_depth} must be >= 1"
-            )
-        if not 0 <= spec.suffix_decoding_corpus_tokens < (1 << 31):
-            raise ValueError(
-                f"suffix_decoding_corpus_tokens="
-                f"{spec.suffix_decoding_corpus_tokens} must be in [0, 2**31)"
-            )
-        if spec.suffix_decoding_max_cached_requests < 0:
-            raise ValueError(
-                f"suffix_decoding_max_cached_requests="
-                f"{spec.suffix_decoding_max_cached_requests} must be >= 0"
-            )
+        validate_suffix_decoding_parameters(spec)
