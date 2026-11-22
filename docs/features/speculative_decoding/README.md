@@ -65,69 +65,46 @@ Draft sampling defaults to `greedy`; set `draft_sample_method` to
 Set `enable_adaptive_verification` to `true` in the speculative config to
 enable [adaptive verification](adaptive_verification.md).
 
-## Suffix hybrid with MTP or DFlash
+## Suffix splice with MTP or DFlash
 
 Single-module MTP and standard DFlash can combine model drafts with suffix
 continuations from the request history and the cross-request corpus. Every
 request still publishes one linear draft, so target verification and sampling
 semantics are unchanged.
 
-```bash
-vllm serve <target-model> \
-  --speculative-config '{
-    "method": "mtp",
-    "num_speculative_tokens": 4,
-    "suffix_hybrid_mode": "direct",
-    "suffix_hybrid_min_match_length": 4
-  }'
-```
-
-`direct` selects a complete suffix or model chain before drafting. It performs
-one device-to-host transfer of the hit flags and runs the remaining drafting
-steps only for misses. MTP still runs the full prefill; DFlash still updates
-context K/V for the full batch. A smaller drafting subbatch only saves time
-when it reduces eager work or reaches a smaller CUDA Graph size. Set
-`suffix_hybrid_compact_direct` to `false` to benchmark full-batch selection
-without the hit-flag transfer or compaction. Set `suffix_hybrid_diagnostics` to
-`true` to retain the last 16 routing decisions and drafter graph sizes for
-debugging. Keep it disabled for performance measurements.
-
-`splice` runs the model drafter for the full batch, then uses the first model
-tokens as a temporary lookup prefix and may replace the remaining tail on the
-GPU:
-
 ```python
 speculative_config = {
     "method": "dflash",
     "model": "<matching-dflash-model>",
-    "num_speculative_tokens": 4,
+    "num_speculative_tokens": 15,
     "suffix_hybrid_mode": "splice",
     "suffix_hybrid_prefix_length": 1,
     "suffix_hybrid_min_match_length": 4,
 }
 ```
 
-Hybrid lookups discard candidates that cannot fill the required continuation
-(`K` tokens for direct, or `K - prefix` tokens for splice) before ranking them.
-Splice keeps the model chain when its tail is identical to the historical tail,
-so acceptance feedback is attributed to the model chain.
+Splice runs the model drafter for the full batch, then uses the first model
+tokens as a temporary lookup prefix and may replace the remaining tail on the
+GPU. Lookups discard candidates that cannot fill all `K - prefix` tokens before
+ranking them. Splice keeps the model chain when its tail is identical to the
+historical tail, so acceptance feedback is attributed to the model chain.
 
-Set `suffix_hybrid_min_expected_accepted` to enable the direct quality gate or
-an additional splice threshold. Acceptance statistics are indexed by source,
-match-length bucket, and absolute draft position. Direct with no threshold
-uses only match and continuation lengths.
+Acceptance statistics are indexed by source, match-length bucket, and absolute
+draft position. Set `suffix_hybrid_min_expected_accepted` to add an expected
+acceptance threshold after the statistics mature. Set
+`suffix_hybrid_diagnostics` to `true` to retain the last 16 routing decisions
+and drafter graph sizes for debugging; keep it disabled for performance
+measurements.
 
-Hybrid modes require greedy drafting and standard verification. They do not
-support adaptive verification, `prefill_context_kv_only`, or watermarking.
-`direct` additionally requires DP=PP=PCP=DCP=1 and EPLB disabled, and does not
-support `index_share_for_mtp_iteration`. Neither mode currently supports DBO
-or microbatching. The splice prefix must be positive and smaller than
+Splice requires greedy drafting and standard verification. It does not support
+adaptive verification, `prefill_context_kv_only`, watermarking, DBO, or
+microbatching. The prefix must be positive and smaller than
 `num_speculative_tokens`.
 
 The corpus and seeded-sampling limitations are the same as for
-[suffix decoding](suffix.md). Hybrid modes also retain a dense GPU token
-history, so account for `max_num_seqs * max_model_len * 4` bytes in addition
-to the corpus and lookup scratch space.
+[suffix decoding](suffix.md). Splice also retains a dense GPU token history, so
+account for `max_num_seqs * max_model_len * 4` bytes in addition to the corpus
+and lookup scratch space.
 
 ## Custom Speculators (Experimental)
 

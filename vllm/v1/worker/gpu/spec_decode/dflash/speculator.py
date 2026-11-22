@@ -3,7 +3,6 @@
 import copy
 from typing import Any
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -13,7 +12,6 @@ from vllm.forward_context import BatchDescriptor, set_forward_context
 from vllm.logger import init_logger
 from vllm.model_executor.layers.attention_layer_base import AttentionLayerBase
 from vllm.triton_utils import tl, triton
-from vllm.utils.torch_utils import async_tensor_h2d
 from vllm.v1.attention.backend import AttentionCGSupport
 from vllm.v1.attention.backends.utils import PAD_SLOT_ID
 from vllm.v1.core.single_type_kv_cache_manager import SlidingWindowManager
@@ -137,10 +135,6 @@ class DFlashSpeculator(DraftModelSpeculator):
 
         self.query_cudagraph_manager: DFlashCudaGraphManager | None = None
         self.draft_kv_cache_group_id: int = -1
-        self.query_only_graph = False
-        self.direct_draft_tokens = torch.zeros_like(self.draft_tokens)
-        self.last_query_num_reqs = 0
-        self.last_query_graph_reqs = 0
 
     @property
     def attn_vllm_config(self) -> VllmConfig:
@@ -198,9 +192,7 @@ class DFlashSpeculator(DraftModelSpeculator):
             self.kv_cache_config,
             self.max_model_len,
             causal=self._group_causal,
-            prepare_forward=(
-                None if self.query_only_graph else self._prepare_graph_forward
-            ),
+            prepare_forward=self._prepare_graph_forward,
             progress_bar_desc=f"Capturing {self._speculator_name.lower()} CUDA graphs",
         )
 
@@ -523,7 +515,6 @@ class DFlashSpeculator(DraftModelSpeculator):
         mm_inputs: tuple[list[torch.Tensor], torch.Tensor] | None = None,
         is_profile: bool = False,
         num_speculative_tokens: int | None = None,
-        draft_req_indices: np.ndarray | None = None,
     ) -> torch.Tensor:
         if self.context_kv_only:
             num_speculative_tokens = 0
@@ -621,39 +612,16 @@ class DFlashSpeculator(DraftModelSpeculator):
         if num_speculative_tokens == 0:
             # No drafts are needed: store the context K/V to keep the drafter in
             # sync, and skip the query pass.
-            self.last_query_num_reqs = 0
-            self.last_query_graph_reqs = 0
             self._store_hidden_states(
                 num_target_tokens, last_hidden_states, aux_hidden_states
             )
             self._precompute_context_kv(0, num_target_tokens, dummy_run)
             return self.draft_tokens[:num_reqs]
 
-        query_num_reqs = num_reqs
-        query_seq_lens = input_batch.seq_lens_cpu_upper_bound
-        query_indices = None
-        query_only_graph = getattr(self, "query_only_graph", False)
-        if query_only_graph:
-            self._store_hidden_states(
-                num_target_tokens, last_hidden_states, aux_hidden_states
-            )
-            self.prepare_context_anchor(
-                num_reqs, input_batch.query_start_loc, num_rejected
-            )
-            self._precompute_context_kv(0, num_target_tokens, dummy_run)
-        if draft_req_indices is not None:
-            query_indices = async_tensor_h2d(
-                draft_req_indices, self.device, torch.int64
-            )
-            self._compact_direct_queries(query_indices)
-            query_num_reqs = len(draft_req_indices)
-            num_query_tokens = query_num_reqs * self.num_query_per_req
-            query_seq_lens = input_batch.seq_lens_cpu_upper_bound[draft_req_indices]
-
         batch_sync, num_batch_tokens = (
             self._build_uniform_batch_dp_sync(
                 dp_sync_state,
-                query_num_reqs,
+                num_reqs,
                 self.num_query_per_req,
             )
             if dp_sync_state is not None
@@ -662,7 +630,7 @@ class DFlashSpeculator(DraftModelSpeculator):
         # Every DFlash step has exactly num_query_per_req tokens, so we can use FULL CGs
         batch_desc, batch_sync = dispatch_cg_and_sync_dp(
             self.query_cudagraph_manager,
-            query_num_reqs,
+            num_reqs,
             num_batch_tokens,
             uniform_token_count=self.num_query_per_req,
             dp_size=self.dp_size,
@@ -675,15 +643,8 @@ class DFlashSpeculator(DraftModelSpeculator):
         num_tokens_across_dp = (
             batch_sync.num_tokens_across_dp if batch_sync is not None else None
         )
-        if query_indices is not None:
-            self.block_tables.gather_block_tables(
-                query_indices,
-                num_reqs_padded=batch_desc.num_reqs or query_num_reqs,
-            )
 
-        if query_only_graph:
-            pass
-        elif batch_desc.cg_mode == CUDAGraphMode.FULL:
+        if batch_desc.cg_mode == CUDAGraphMode.FULL:
             assert batch_desc.num_reqs is not None
             self._prepare_graph_replay(
                 input_batch,
@@ -703,16 +664,15 @@ class DFlashSpeculator(DraftModelSpeculator):
             self._precompute_context_kv(0, num_target_tokens, dummy_run)
 
         is_full_cudagraph = batch_desc.cg_mode == CUDAGraphMode.FULL
-        if not (
-            is_full_cudagraph
-            and self.supports_decode_metadata_update
-            and not query_only_graph
-        ):
+        # During FULL cudagraph with a model that supports decode metadata updates,
+        # the metadata update is captured in the graph, and we can skip the full
+        # build below.
+        if not (is_full_cudagraph and self.supports_decode_metadata_update):
             draft_attn_metadata = self._build_uniform_attn_metadata(
-                num_reqs=query_num_reqs,
+                num_reqs=num_reqs,
                 batch_desc=batch_desc,
                 num_query_per_req=self.num_query_per_req,
-                seq_lens_cpu_upper_bound=query_seq_lens,
+                seq_lens_cpu_upper_bound=input_batch.seq_lens_cpu_upper_bound,
                 step=self.num_query_per_req,
                 causal=self._group_causal,
             )
@@ -722,8 +682,6 @@ class DFlashSpeculator(DraftModelSpeculator):
         # DFlash processes all speculative tokens in one forward pass,
         # so the real token count is num_query_tokens.
         self._prepare_eplb_forward(num_query_tokens)
-        self.last_query_num_reqs = query_num_reqs
-        self.last_query_graph_reqs = batch_desc.num_reqs or query_num_reqs
 
         if is_full_cudagraph:
             assert self.query_cudagraph_manager is not None
@@ -734,7 +692,7 @@ class DFlashSpeculator(DraftModelSpeculator):
                 self.kv_cache_config,
             )
             self._generate_draft(
-                query_num_reqs,
+                num_reqs,
                 num_tokens_padded,
                 draft_attn_metadata,
                 draft_slot_mappings_by_layer,
@@ -742,51 +700,7 @@ class DFlashSpeculator(DraftModelSpeculator):
                 cudagraph_runtime_mode=batch_desc.cg_mode,
             )
 
-        if query_indices is not None:
-            self.direct_draft_tokens[query_indices] = self.draft_tokens[:query_num_reqs]
-            return self.direct_draft_tokens[:num_reqs]
         return self.draft_tokens[:num_reqs]
-
-    def _compact_direct_queries(self, indices: torch.Tensor) -> None:
-        q = self.num_query_per_req
-        k = self.num_speculative_steps
-        n = indices.shape[0]
-        query_offsets = torch.arange(q, dtype=torch.int64, device=self.device)
-        token_indices = (indices[:, None] * q + query_offsets).flatten()
-        num_tokens = n * q
-        self.input_buffers.input_ids[:num_tokens] = self.input_buffers.input_ids[
-            token_indices
-        ]
-        self.input_buffers.positions[:num_tokens] = self.input_buffers.positions[
-            token_indices
-        ]
-        self.input_buffers.is_padding[:num_tokens] = self.input_buffers.is_padding[
-            token_indices
-        ]
-        self.input_buffers.is_padding[num_tokens:].fill_(True)
-        self.input_buffers.seq_lens[:n] = self.input_buffers.seq_lens[indices]
-        self.input_buffers.seq_lens[n:].zero_()
-        query_start = torch.arange(
-            0, num_tokens + 1, q, dtype=torch.int32, device=self.device
-        )
-        self.input_buffers.query_start_loc[: n + 1] = query_start
-        self.input_buffers.query_start_loc[n + 1 :].fill_(num_tokens)
-        for gid in self.draft_kv_cache_group_ids:
-            slots = self.block_tables.slot_mappings[gid]
-            slots[:num_tokens] = slots[token_indices]
-            slots[num_tokens:].fill_(PAD_SLOT_ID)
-
-        sample_offsets = torch.arange(k, dtype=torch.int64, device=self.device)
-        sample_rows = (indices[:, None] * k + sample_offsets).flatten()
-        num_samples = n * k
-        old_indices = self.sample_indices[sample_rows]
-        new_rows = torch.arange(num_samples, device=self.device) // k
-        self.sample_indices[:num_samples] = old_indices % q + new_rows * q
-        self.sample_pos[:num_samples] = self.sample_pos[sample_rows]
-        self.sample_idx_mapping[:num_samples] = self.sample_idx_mapping[sample_rows]
-        self.sample_indices[num_samples:].zero_()
-        self.sample_pos[num_samples:].zero_()
-        self.sample_idx_mapping[num_samples:].fill_(-1)
 
 
 # Extra programs that pad the buffers past the batch (up to max_num_tokens).

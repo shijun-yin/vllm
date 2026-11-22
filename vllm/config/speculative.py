@@ -612,10 +612,9 @@ class SpeculativeConfig:
     """Deprecated and has no effect: the GPU suffix speculator always drafts
     `num_speculative_tokens` tokens."""
 
-    suffix_hybrid_mode: Literal["off", "direct", "splice"] = "off"
-    """Combine suffix proposals with MTP or DFlash. `direct` selects whole
-    chains before drafting and can compact the model-drafting subbatch;
-    `splice` retains a model prefix and selects a suffix tail on the GPU."""
+    suffix_hybrid_mode: Literal["off", "splice"] = "off"
+    """Combine suffix proposals with MTP or DFlash. `splice` retains a model
+    prefix and selects a suffix tail on the GPU."""
 
     suffix_hybrid_min_match_length: int = 4
     """Minimum context match length for a hybrid suffix candidate."""
@@ -625,10 +624,6 @@ class SpeculativeConfig:
 
     suffix_hybrid_min_expected_accepted: float | None = None
     """Optional minimum expected accepted draft tokens for suffix routing."""
-
-    suffix_hybrid_compact_direct: bool = True
-    """Whether direct compacts misses for model drafting. Disable for a
-    full-batch, no-host-sync selection baseline."""
 
     suffix_hybrid_diagnostics: bool = False
     """Whether to retain the last 16 routing decisions and drafter graph sizes.
@@ -788,7 +783,6 @@ class SpeculativeConfig:
             "suffix_hybrid_min_match_length",
             "suffix_hybrid_prefix_length",
             "suffix_hybrid_min_expected_accepted",
-            "suffix_hybrid_compact_direct",
             "suffix_hybrid_diagnostics",
             "draft_load_config",
             "rejection_sample_method",
@@ -1552,23 +1546,6 @@ class SpeculativeConfig:
                 )
             if self.method == "mtp" and self.use_multi_module_mtp():
                 raise ValueError("Suffix hybrid decoding supports single-module MTP.")
-            if (
-                self.suffix_hybrid_mode == "direct"
-                and self.method == "mtp"
-                and self.draft_model_config is not None
-                and (
-                    self.index_share_for_mtp_iteration is True
-                    or getattr(
-                        self.draft_model_config.hf_config,
-                        "index_share_for_mtp_iteration",
-                        False,
-                    )
-                )
-            ):
-                raise ValueError(
-                    "direct suffix hybrid decoding does not support "
-                    "index_share_for_mtp_iteration."
-                )
             if self.draft_sample_method != "greedy":
                 raise ValueError("Suffix hybrid decoding requires greedy drafting.")
             if self.rejection_sample_method != "standard":
@@ -1608,21 +1585,6 @@ class SpeculativeConfig:
             if parallel is not None and parallel.use_ubatching:
                 raise ValueError(
                     "Suffix hybrid decoding does not support DBO or microbatching."
-                )
-            if (
-                self.suffix_hybrid_mode == "direct"
-                and parallel is not None
-                and (
-                    parallel.data_parallel_size != 1
-                    or parallel.pipeline_parallel_size != 1
-                    or parallel.prefill_context_parallel_size != 1
-                    or parallel.decode_context_parallel_size != 1
-                    or parallel.enable_eplb
-                )
-            ):
-                raise ValueError(
-                    "direct suffix hybrid decoding requires DP=PP=PCP=DCP=1 "
-                    "and EPLB disabled."
                 )
 
         return self

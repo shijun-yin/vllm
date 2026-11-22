@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-import copy
 from typing import Any
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -11,7 +9,6 @@ from vllm.config import VllmConfig
 from vllm.config.compilation import CUDAGraphMode
 from vllm.forward_context import BatchDescriptor, set_forward_context
 from vllm.triton_utils import tl, triton
-from vllm.utils.torch_utils import async_tensor_h2d
 from vllm.v1.worker.gpu.dp_utils import DPSyncState, dispatch_cg_and_sync_dp
 from vllm.v1.worker.gpu.input_batch import InputBatch, InputBuffers
 from vllm.v1.worker.gpu.spec_decode.autoregressive.cudagraph_utils import (
@@ -39,9 +36,6 @@ class TargetDependentARSpeculator(AutoRegressiveSpeculator):
         self.sample_src_positions = torch.zeros(
             self.max_num_reqs, dtype=torch.int64, device=device
         )
-        self.direct_draft_tokens = torch.zeros_like(self.draft_tokens)
-        self.last_draft_num_reqs = 0
-        self.last_draft_graph_reqs = 0
 
         self.inputs_embeds: torch.Tensor | None = None
 
@@ -133,13 +127,10 @@ class TargetDependentARSpeculator(AutoRegressiveSpeculator):
         mm_inputs: tuple[list[torch.Tensor], torch.Tensor] | None = None,
         is_profile: bool = False,
         num_speculative_tokens: int | None = None,
-        draft_req_indices: np.ndarray | None = None,
     ) -> torch.Tensor:
         num_reqs = input_batch.num_reqs
         if num_speculative_tokens is None:
             num_speculative_tokens = self.num_speculative_steps
-        self.last_draft_num_reqs = num_reqs if num_speculative_tokens > 0 else 0
-        self.last_draft_graph_reqs = 0
         num_tokens = input_batch.num_tokens
         num_tokens_padded = input_batch.num_tokens_after_padding
         max_query_len = input_batch.num_scheduled_tokens.max()
@@ -265,29 +256,6 @@ class TargetDependentARSpeculator(AutoRegressiveSpeculator):
                 input_batch.idx_mapping, num_reqs_padded=num_reqs
             )
 
-        if draft_req_indices is not None:
-            self.last_draft_num_reqs = len(draft_req_indices)
-            self.direct_draft_tokens[:num_reqs].copy_(self.draft_tokens[:num_reqs])
-            compact_batch, compact_rejected, compact_seq_lens = (
-                self._compact_direct_batch(input_batch, num_rejected, draft_req_indices)
-            )
-            num_draft_reqs = len(draft_req_indices)
-            self._run_multi_step_decode(
-                compact_batch,
-                compact_rejected,
-                num_draft_reqs,
-                dummy_run and skip_attn_for_dummy_run,
-                dp_sync_state,
-                compact_seq_lens,
-                is_profile,
-                num_speculative_tokens,
-                regather_block_tables=True,
-            )
-            indices = async_tensor_h2d(draft_req_indices, self.device, torch.int64)
-            self.direct_draft_tokens[indices] = self.draft_tokens[:num_draft_reqs]
-            self.draft_tokens[:num_reqs] = self.direct_draft_tokens[:num_reqs]
-            return self.draft_tokens[:num_reqs]
-
         self._run_multi_step_decode(
             input_batch,
             num_rejected,
@@ -300,39 +268,6 @@ class TargetDependentARSpeculator(AutoRegressiveSpeculator):
         )
 
         return self.draft_tokens[:num_reqs]
-
-    def _compact_direct_batch(
-        self,
-        input_batch: InputBatch,
-        num_rejected: torch.Tensor,
-        indices_np: np.ndarray,
-    ) -> tuple[InputBatch, torch.Tensor, torch.Tensor]:
-        indices = async_tensor_h2d(indices_np, self.device, torch.int64)
-        n = len(indices_np)
-        self.draft_tokens[:n] = self.draft_tokens[indices]
-        self.hidden_states[:n] = self.hidden_states[indices]
-        self.input_buffers.input_ids[:n] = self.input_buffers.input_ids[indices]
-        self.input_buffers.positions[:n] = self.input_buffers.positions[indices]
-        self.input_buffers.seq_lens[:n] = self.input_buffers.seq_lens[indices]
-        self.sample_src_positions[:n] = self.sample_src_positions[indices]
-        self.last_token_indices[:n] = self.last_token_indices[indices]
-        self.idx_mapping[:n] = self.idx_mapping[indices]
-        self.temperature[:n] = self.temperature[indices]
-        self.seeds[:n] = self.seeds[indices]
-        self.idx_mapping[n:].fill_(-1)
-        self.input_buffers.seq_lens[n:].zero_()
-        self.input_buffers.positions[n:].zero_()
-        query_start_loc = torch.arange(n + 1, dtype=torch.int32, device=self.device)
-        self.input_buffers.query_start_loc[: n + 1] = query_start_loc
-        self.input_buffers.query_start_loc[n + 1 :].fill_(n)
-
-        compact_batch = copy.copy(input_batch)
-        compact_batch.num_reqs = n
-        compact_batch.idx_mapping = self.idx_mapping[:n]
-        compact_batch.seq_lens = self.input_buffers.seq_lens[:n]
-        compact_rejected = num_rejected[indices]
-        compact_seq_lens = input_batch.seq_lens_cpu_upper_bound[indices_np]
-        return compact_batch, compact_rejected, compact_seq_lens
 
     @torch.inference_mode()
     def _run_model(

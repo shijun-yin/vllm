@@ -1330,7 +1330,7 @@ def test_suffix_config_defaults():
 
 def test_suffix_hybrid_requires_model_drafter():
     with pytest.raises(ValueError, match="requires method='mtp' or 'dflash'"):
-        SpeculativeConfig(method="suffix", suffix_hybrid_mode="direct")
+        SpeculativeConfig(method="suffix", suffix_hybrid_mode="splice")
 
 
 def test_model_runner_supports_custom_logits_processors():

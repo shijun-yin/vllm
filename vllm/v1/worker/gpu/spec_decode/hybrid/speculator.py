@@ -3,7 +3,6 @@
 
 from typing import TYPE_CHECKING, Any
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -46,7 +45,6 @@ def _hybrid_route_kernel(
     STATS_K: tl.constexpr,
     K_PO2: tl.constexpr,
     PREFIX: tl.constexpr,
-    SPLICE: tl.constexpr,
     QUALITY_GATE: tl.constexpr,
     MIN_EXPECTED: tl.constexpr,
 ):
@@ -68,76 +66,60 @@ def _hybrid_route_kernel(
     model_prob = (model_accepted + 1.0) / (model_observed + 2.0)
     model_survival = tl.cumprod(model_prob, axis=0)
 
-    if SPLICE:
-        prefix_survival = tl.sum(tl.where(k == PREFIX - 1, model_survival, 0.0), axis=0)
-        suffix_survival = prefix_survival * tl.cumprod(
-            tl.where(k < PREFIX, 1.0, suffix_prob), axis=0
+    prefix_survival = tl.sum(tl.where(k == PREFIX - 1, model_survival, 0.0), axis=0)
+    suffix_survival = prefix_survival * tl.cumprod(
+        tl.where(k < PREFIX, 1.0, suffix_prob), axis=0
+    )
+    splice_score = tl.sum(
+        tl.where(mask & (k < PREFIX), model_survival, 0.0), axis=0
+    ) + tl.sum(tl.where(mask & (k >= PREFIX), suffix_survival, 0.0), axis=0)
+    model_score = tl.sum(tl.where(mask, model_survival, 0.0), axis=0)
+    history_mature = (
+        tl.sum(tl.where(k == PREFIX, suffix_observed, 0.0), axis=0) >= _MIN_OBSERVATIONS
+    )
+    model_mature = (
+        tl.min(tl.where(mask & (k >= PREFIX), model_observed, float("inf")), axis=0)
+        >= _MIN_OBSERVATIONS
+    )
+    mature = history_mature & model_mature
+    better = splice_score > model_score
+    if QUALITY_GATE:
+        better = better & (splice_score >= MIN_EXPECTED)
+    select = (~history_mature) | (mature & better)
+    required = K - PREFIX
+    prefix_valid = (
+        tl.sum(
+            (
+                tl.load(
+                    model_drafts_ptr + b * model_drafts_stride + k,
+                    mask=k < PREFIX,
+                    other=0,
+                )
+                < 0
+            ).to(tl.int32),
+            axis=0,
         )
-        splice_score = tl.sum(
-            tl.where(mask & (k < PREFIX), model_survival, 0.0), axis=0
-        ) + tl.sum(tl.where(mask & (k >= PREFIX), suffix_survival, 0.0), axis=0)
-        model_score = tl.sum(tl.where(mask, model_survival, 0.0), axis=0)
-        history_mature = (
-            tl.sum(tl.where(k == PREFIX, suffix_observed, 0.0), axis=0)
-            >= _MIN_OBSERVATIONS
+        == 0
+    )
+    tail_mask = mask & (k >= PREFIX)
+    model_tail = tl.load(
+        model_drafts_ptr + b * model_drafts_stride + k,
+        mask=tail_mask,
+        other=-1,
+    )
+    suffix_tail = tl.load(
+        suffix_drafts_ptr + b * suffix_drafts_stride + k - PREFIX,
+        mask=tail_mask,
+        other=-2,
+    )
+    different_tail = (
+        tl.sum(
+            tl.where(tail_mask, model_tail != suffix_tail, 0).to(tl.int32),
+            axis=0,
         )
-        model_mature = (
-            tl.min(tl.where(mask & (k >= PREFIX), model_observed, float("inf")), axis=0)
-            >= _MIN_OBSERVATIONS
-        )
-        mature = history_mature & model_mature
-        better = splice_score > model_score
-        if QUALITY_GATE:
-            better = better & (splice_score >= MIN_EXPECTED)
-        select = (~history_mature) | (mature & better)
-        required = K - PREFIX
-        prefix_valid = (
-            tl.sum(
-                (
-                    tl.load(
-                        model_drafts_ptr + b * model_drafts_stride + k,
-                        mask=k < PREFIX,
-                        other=0,
-                    )
-                    < 0
-                ).to(tl.int32),
-                axis=0,
-            )
-            == 0
-        )
-        tail_mask = mask & (k >= PREFIX)
-        model_tail = tl.load(
-            model_drafts_ptr + b * model_drafts_stride + k,
-            mask=tail_mask,
-            other=-1,
-        )
-        suffix_tail = tl.load(
-            suffix_drafts_ptr + b * suffix_drafts_stride + k - PREFIX,
-            mask=tail_mask,
-            other=-2,
-        )
-        different_tail = (
-            tl.sum(
-                tl.where(tail_mask, model_tail != suffix_tail, 0).to(tl.int32),
-                axis=0,
-            )
-            > 0
-        )
-        select = select & different_tail
-    else:
-        splice_score = tl.sum(
-            tl.where(mask, tl.cumprod(suffix_prob, axis=0), 0.0), axis=0
-        )
-        model_score = tl.sum(tl.where(mask, model_survival, 0.0), axis=0)
-        history_mature = (
-            tl.sum(tl.where(k == 0, suffix_observed, 0.0), axis=0) >= _MIN_OBSERVATIONS
-        )
-        if QUALITY_GATE:
-            select = (~history_mature) | (splice_score >= MIN_EXPECTED)
-        else:
-            select = True
-        required = K
-        prefix_valid = True
+        > 0
+    )
+    select = select & different_tail
 
     valid = (
         (tl.load(num_valid_ptr + b) >= required)
@@ -169,7 +151,6 @@ def _hybrid_publish_kernel(
     STATS_K: tl.constexpr,
     K_PO2: tl.constexpr,
     PREFIX: tl.constexpr,
-    SPLICE: tl.constexpr,
 ):
     b = tl.program_id(0)
     req = tl.load(idx_mapping_ptr + b)
@@ -177,13 +158,13 @@ def _hybrid_publish_kernel(
     mask = k < K
     use_suffix = tl.load(use_suffix_ptr + b)
     model = tl.load(model_drafts_ptr + b * model_drafts_stride + k, mask=mask, other=-1)
-    suffix_pos = k - PREFIX if SPLICE else k
+    suffix_pos = k - PREFIX
     suffix = tl.load(
         suffix_drafts_ptr + b * suffix_drafts_stride + suffix_pos,
         mask=mask & (suffix_pos >= 0),
         other=-1,
     )
-    take_suffix = use_suffix & ((not SPLICE) | (k >= PREFIX))
+    take_suffix = use_suffix & (k >= PREFIX)
     out = tl.where(take_suffix, suffix, model)
     tl.store(output_ptr + b * output_stride + k, out, mask=mask)
 
@@ -251,7 +232,6 @@ class HybridSpeculator(DraftModelSpeculator):
         self.prefix_len = spec.suffix_hybrid_prefix_length
         self.min_match = spec.suffix_hybrid_min_match_length
         self.min_expected = spec.suffix_hybrid_min_expected_accepted
-        self.compact_direct = spec.suffix_hybrid_compact_direct
         self.diagnostics = spec.suffix_hybrid_diagnostics
         self.max_num_reqs = self.suffix.max_num_reqs
         self.num_speculative_steps = spec.num_speculative_tokens
@@ -333,12 +313,6 @@ class HybridSpeculator(DraftModelSpeculator):
         self.drafter.set_attn(*args)
 
     def init_cudagraph_manager(self, cudagraph_mode) -> None:
-        from vllm.v1.worker.gpu.spec_decode.dflash.speculator import DFlashSpeculator
-
-        if isinstance(self.drafter, DFlashSpeculator):
-            self.drafter.query_only_graph = (
-                self.mode == "direct" and self.compact_direct
-            )
         self.drafter.init_cudagraph_manager(cudagraph_mode)
         self.suffix.init_cudagraph_manager(cudagraph_mode)
 
@@ -426,8 +400,7 @@ class HybridSpeculator(DraftModelSpeculator):
             K=k,
             STATS_K=self.num_speculative_steps,
             K_PO2=triton.next_power_of_2(k),
-            PREFIX=self.prefix_len if self.mode == "splice" else 0,
-            SPLICE=self.mode == "splice",
+            PREFIX=self.prefix_len,
             QUALITY_GATE=quality_gate,
             MIN_EXPECTED=self.min_expected or 0.0,
         )
@@ -459,8 +432,7 @@ class HybridSpeculator(DraftModelSpeculator):
             K=k,
             STATS_K=self.num_speculative_steps,
             K_PO2=triton.next_power_of_2(k),
-            PREFIX=self.prefix_len if self.mode == "splice" else 0,
-            SPLICE=self.mode == "splice",
+            PREFIX=self.prefix_len,
         )
         n = input_batch.num_reqs
         if self.diagnostics:
@@ -531,33 +503,6 @@ class HybridSpeculator(DraftModelSpeculator):
             if not dummy_run and k == 0:
                 self.last_valid[input_batch.idx_mapping] = 0
             return model_drafts
-
-        if self.mode == "direct":
-            suffix_drafts, _, _, _ = self.suffix.propose_hybrid(
-                input_batch, num_sampled, last_sampled, k
-            )
-            self._route(k, self.output_drafts, num_sampled)
-            if not self.compact_direct:
-                model_drafts = self.drafter.propose(**kwargs, num_speculative_tokens=k)
-                return self._publish(
-                    input_batch, model_drafts, suffix_drafts, num_sampled, k
-                )
-            hits = self.use_suffix[: input_batch.num_reqs].cpu().numpy()
-            miss = np.flatnonzero(~hits)
-            draft_indices = None
-            drafter_k = k
-            if len(miss) == 0:
-                drafter_k = 0
-            elif len(miss) < input_batch.num_reqs:
-                draft_indices = miss
-            model_drafts = self.drafter.propose(
-                **kwargs,
-                num_speculative_tokens=drafter_k,
-                draft_req_indices=draft_indices,
-            )
-            return self._publish(
-                input_batch, model_drafts, suffix_drafts, num_sampled, k
-            )
 
         model_drafts = self.drafter.propose(**kwargs, num_speculative_tokens=k)
         if k <= self.prefix_len:

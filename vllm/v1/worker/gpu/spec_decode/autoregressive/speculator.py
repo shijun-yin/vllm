@@ -174,7 +174,6 @@ class AutoRegressiveSpeculator(DraftModelSpeculator):
         seq_lens_cpu_upper_bound: torch.Tensor,
         is_profile: bool,
         num_speculative_steps: int,
-        regather_block_tables: bool = False,
     ) -> None:
         decode_batch_sync, num_batch_tokens = None, num_reqs
         if dp_sync_state is not None:
@@ -197,12 +196,6 @@ class AutoRegressiveSpeculator(DraftModelSpeculator):
         if self.decode_cudagraph_manager is not None:
             decode_batch_desc = self.decode_cudagraph_manager.specialize_spec_tokens(
                 decode_batch_desc, num_speculative_steps
-            )
-        self.last_draft_graph_reqs = decode_batch_desc.num_reqs or num_reqs
-        if regather_block_tables:
-            self.block_tables.gather_block_tables(
-                self.idx_mapping[:num_reqs],
-                num_reqs_padded=decode_batch_desc.num_reqs or num_reqs,
             )
 
         self._prepare_decode_inputs(

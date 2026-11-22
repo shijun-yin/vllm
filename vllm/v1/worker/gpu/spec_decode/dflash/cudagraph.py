@@ -85,10 +85,11 @@ class DFlashCudaGraphManager(CudaGraphManager):
         kv_cache_config: KVCacheConfig,
         max_model_len: int,
         causal: bool | Mapping[int, bool],
-        prepare_forward: Callable[[int, dict[str, Any] | None], None] | None,
+        prepare_forward: Callable[[int, dict[str, Any] | None], None],
         progress_bar_desc: str = "Capturing CUDA graphs",
     ) -> None:
-        """Capture optional context preparation ahead of the query forward."""
+        """`prepare_forward(num_reqs, attn_metadata)` is captured ahead of the
+        query forward."""
 
         def create_forward_fn(
             desc: BatchExecutionDescriptor,
@@ -115,8 +116,7 @@ class DFlashCudaGraphManager(CudaGraphManager):
             attn_metadata, slot_mappings = attn_state
 
             def forward(cg_mode: CUDAGraphMode) -> None:
-                if prepare_forward is not None:
-                    prepare_forward(num_reqs, attn_metadata)
+                prepare_forward(num_reqs, attn_metadata)
                 forward_fn(
                     num_reqs,
                     num_tokens,
