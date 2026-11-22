@@ -612,6 +612,28 @@ class SpeculativeConfig:
     """Deprecated and has no effect: the GPU suffix speculator always drafts
     `num_speculative_tokens` tokens."""
 
+    suffix_hybrid_mode: Literal["off", "direct", "splice"] = "off"
+    """Combine suffix proposals with MTP or DFlash. `direct` selects whole
+    chains before drafting and can compact the model-drafting subbatch;
+    `splice` retains a model prefix and selects a suffix tail on the GPU."""
+
+    suffix_hybrid_min_match_length: int = 4
+    """Minimum context match length for a hybrid suffix candidate."""
+
+    suffix_hybrid_prefix_length: int = 1
+    """Number of model draft tokens retained before a splice lookup."""
+
+    suffix_hybrid_min_expected_accepted: float | None = None
+    """Optional minimum expected accepted draft tokens for suffix routing."""
+
+    suffix_hybrid_compact_direct: bool = True
+    """Whether direct compacts misses for model drafting. Disable for a
+    full-batch, no-host-sync selection baseline."""
+
+    suffix_hybrid_diagnostics: bool = False
+    """Whether to retain the last 16 routing decisions and drafter graph sizes.
+    Enable for debugging only; recording them adds GPU work to every draft step."""
+
     draft_load_config: LoadConfig | None = None
     """Load config for the draft model. If not specified, will use the load
     config from the target model."""
@@ -762,6 +784,12 @@ class SpeculativeConfig:
             "suffix_decoding_corpus_tokens",
             "suffix_decoding_max_spec_factor",
             "suffix_decoding_min_token_prob",
+            "suffix_hybrid_mode",
+            "suffix_hybrid_min_match_length",
+            "suffix_hybrid_prefix_length",
+            "suffix_hybrid_min_expected_accepted",
+            "suffix_hybrid_compact_direct",
+            "suffix_hybrid_diagnostics",
             "draft_load_config",
             "rejection_sample_method",
             "synthetic_acceptance_rates",
@@ -1516,6 +1544,86 @@ class SpeculativeConfig:
                 "the draft logits, which use_local_argmax_reduction never "
                 "materializes. Disable one of them."
             )
+
+        if self.suffix_hybrid_mode != "off":
+            if self.method not in ("mtp", "dflash"):
+                raise ValueError(
+                    "Suffix hybrid decoding requires method='mtp' or 'dflash'."
+                )
+            if self.method == "mtp" and self.use_multi_module_mtp():
+                raise ValueError("Suffix hybrid decoding supports single-module MTP.")
+            if (
+                self.suffix_hybrid_mode == "direct"
+                and self.method == "mtp"
+                and self.draft_model_config is not None
+                and (
+                    self.index_share_for_mtp_iteration is True
+                    or getattr(
+                        self.draft_model_config.hf_config,
+                        "index_share_for_mtp_iteration",
+                        False,
+                    )
+                )
+            ):
+                raise ValueError(
+                    "direct suffix hybrid decoding does not support "
+                    "index_share_for_mtp_iteration."
+                )
+            if self.draft_sample_method != "greedy":
+                raise ValueError("Suffix hybrid decoding requires greedy drafting.")
+            if self.rejection_sample_method != "standard":
+                raise ValueError(
+                    "Suffix hybrid decoding requires standard target verification."
+                )
+            if self.enable_adaptive_verification or self.prefill_context_kv_only:
+                raise ValueError(
+                    "Suffix hybrid decoding does not support adaptive verification "
+                    "or prefill_context_kv_only."
+                )
+            if (
+                not 0
+                < self.suffix_hybrid_min_match_length
+                <= (self.suffix_decoding_max_tree_depth)
+            ):
+                raise ValueError(
+                    "suffix_hybrid_min_match_length must be positive and no greater "
+                    "than suffix_decoding_max_tree_depth."
+                )
+            threshold = self.suffix_hybrid_min_expected_accepted
+            if threshold is not None and not (
+                0 <= threshold <= self.num_speculative_tokens
+            ):
+                raise ValueError(
+                    "suffix_hybrid_min_expected_accepted must be between zero and "
+                    "num_speculative_tokens."
+                )
+            if self.suffix_hybrid_mode == "splice" and not (
+                0 < self.suffix_hybrid_prefix_length < self.num_speculative_tokens
+            ):
+                raise ValueError(
+                    "suffix_hybrid_prefix_length must be positive and smaller than "
+                    "num_speculative_tokens in splice mode."
+                )
+            parallel = self.target_parallel_config
+            if parallel is not None and parallel.use_ubatching:
+                raise ValueError(
+                    "Suffix hybrid decoding does not support DBO or microbatching."
+                )
+            if (
+                self.suffix_hybrid_mode == "direct"
+                and parallel is not None
+                and (
+                    parallel.data_parallel_size != 1
+                    or parallel.pipeline_parallel_size != 1
+                    or parallel.prefill_context_parallel_size != 1
+                    or parallel.decode_context_parallel_size != 1
+                    or parallel.enable_eplb
+                )
+            ):
+                raise ValueError(
+                    "direct suffix hybrid decoding requires DP=PP=PCP=DCP=1 "
+                    "and EPLB disabled."
+                )
 
         return self
 

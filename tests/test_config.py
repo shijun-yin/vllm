@@ -1328,6 +1328,11 @@ def test_suffix_config_defaults():
         SpeculativeConfig(method="suffix", suffix_decoding_corpus_tokens=-1)
 
 
+def test_suffix_hybrid_requires_model_drafter():
+    with pytest.raises(ValueError, match="requires method='mtp' or 'dflash'"):
+        SpeculativeConfig(method="suffix", suffix_hybrid_mode="direct")
+
+
 def test_model_runner_supports_custom_logits_processors():
     config = VllmConfig()
     config.model_config = cast(

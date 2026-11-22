@@ -25,7 +25,10 @@ def init_speculator(
     The speculator is constructed with `(vllm_config, device)`, plus
     `req_states` if its constructor accepts it.
     """
-    from vllm.v1.worker.gpu.spec_decode.speculator import BaseSpeculator
+    from vllm.v1.worker.gpu.spec_decode.speculator import (
+        BaseSpeculator,
+        DraftModelSpeculator,
+    )
 
     speculative_config = vllm_config.speculative_config
     assert speculative_config is not None
@@ -44,6 +47,12 @@ def init_speculator(
         )
     # BaseSpeculator doesn't define the constructor signature.
     factory = cast(Callable[..., "BaseSpeculator"], speculator_cls)
+    if speculative_config.suffix_hybrid_mode != "off":
+        from vllm.v1.worker.gpu.spec_decode.hybrid.speculator import HybridSpeculator
+
+        drafter = factory(vllm_config, device)
+        assert isinstance(drafter, DraftModelSpeculator)
+        return HybridSpeculator(vllm_config, device, req_states, drafter)
     if "req_states" in inspect.signature(factory).parameters:
         return factory(vllm_config, device, req_states=req_states)
     return factory(vllm_config, device)

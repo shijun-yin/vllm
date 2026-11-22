@@ -79,7 +79,12 @@ def _suffix_local_scan_kernel(
     num_sampled_ptr,  # *int32  [B]
     scratch_ptr,  # *int64  [B, scratch_stride]  (output)
     scratch_stride,
+    query_prefix_ptr,
+    query_prefix_stride,
     Lp1,  # int64 packing radix (> any position)
+    QUERY_PREFIX: tl.constexpr,
+    REQUIRE_FULL: tl.constexpr,
+    K: tl.constexpr,
     MAX_DEPTH: tl.constexpr,
     BLOCK: tl.constexpr,
 ):
@@ -104,11 +109,23 @@ def _suffix_local_scan_kernel(
 
     pos = blk * BLOCK + tl.arange(0, BLOCK).to(tl.int64)
     active = (pos >= 1) & (pos < seq_len) & (num_sampled > 0)
+    if REQUIRE_FULL:
+        active = active & (pos + K <= seq_len)
     match_len = tl.zeros([BLOCK], dtype=tl.int64)
     for t in range(MAX_DEPTH):
         # Request token t back from its end (newest first).
-        tail_pos = seq_len - 1 - t
-        tail_tok = tl.load(row + tail_pos, mask=tail_pos >= 0, other=-2)
+        tail_pos = seq_len + QUERY_PREFIX - 1 - t
+        from_prefix = tail_pos >= seq_len
+        tail_tok = tl.load(
+            query_prefix_ptr + b * query_prefix_stride + tail_pos - seq_len,
+            mask=from_prefix,
+            other=-2,
+        )
+        tail_tok = tl.where(
+            from_prefix,
+            tail_tok,
+            tl.load(row + tail_pos, mask=tail_pos >= 0, other=-2),
+        )
         src_pos = pos - 1 - t
         ok = active & (src_pos >= 0) & (tail_pos >= 0)
         tok = tl.load(row + src_pos, mask=ok, other=-1)
@@ -123,9 +140,15 @@ def _suffix_local_scan_kernel(
 def _corpus_draft(
     row,
     seq_len,
+    batch_idx,
     table_ptr,
     corpus_ptr,
     corpus_len,
+    query_prefix_ptr,
+    query_prefix_stride,
+    QUERY_PREFIX: tl.constexpr,
+    REQUIRE_FULL: tl.constexpr,
+    MIN_MATCH: tl.constexpr,
     HASH_MUL: tl.constexpr,
     NUM_BUCKETS: tl.constexpr,
     SLOTS: tl.constexpr,
@@ -149,14 +172,31 @@ def _corpus_draft(
     d_iota = tl.arange(0, DEPTH_PO2).to(tl.int64)
     k_iota = tl.arange(0, K_PO2).to(tl.int64)
 
-    tail_pos = seq_len - 1 - d_iota
-    tail = tl.load(
-        row + tail_pos, mask=(d_iota < MAX_DEPTH) & (tail_pos >= 0), other=-2
+    tail_pos = seq_len + QUERY_PREFIX - 1 - d_iota
+    from_prefix = tail_pos >= seq_len
+    prefix_tail = tl.load(
+        query_prefix_ptr + batch_idx * query_prefix_stride + tail_pos - seq_len,
+        mask=from_prefix & (d_iota < MAX_DEPTH),
+        other=-2,
     )
+    history_tail = tl.load(
+        row + tail_pos,
+        mask=(~from_prefix) & (d_iota < MAX_DEPTH) & (tail_pos >= 0),
+        other=-2,
+    )
+    tail = tl.where(from_prefix, prefix_tail, history_tail)
     # Hash the trailing tokens newest-first, as ingestion does.
     hv = tl.zeros((), tl.int64)
     for d in tl.static_range(4):
-        tok = tl.load(row + seq_len - 1 - d, mask=seq_len - 1 - d >= 0, other=0)
+        pos = seq_len + QUERY_PREFIX - 1 - d
+        use_prefix = pos >= seq_len
+        prefix_tok = tl.load(
+            query_prefix_ptr + batch_idx * query_prefix_stride + pos - seq_len,
+            mask=use_prefix,
+            other=0,
+        )
+        history_tok = tl.load(row + pos, mask=(~use_prefix) & (pos >= 0), other=0)
+        tok = tl.where(use_prefix, prefix_tok, history_tok)
         hv = (hv ^ tok.to(tl.int64)) * HASH_MUL
         if d == 1:
             bucket2 = _bucket(hv, NUM_BUCKETS)
@@ -178,7 +218,13 @@ def _corpus_draft(
     miss = (src != tail[None, :]).to(tl.int32)
     c_len = tl.sum((tl.cumsum(miss, axis=1) == 0).to(tl.int64), axis=1)
     nxt = tl.load(corpus_ptr + cpos, mask=(vals >= 0) & (cpos < corpus_len), other=-1)
-    ok = (vals >= 0) & (nxt >= 0) & (c_len >= key_len) & (seq_len >= key_len)
+    ok = (
+        (vals >= 0)
+        & (nxt >= 0)
+        & (c_len >= key_len)
+        & (c_len >= MIN_MATCH)
+        & (seq_len + QUERY_PREFIX >= key_len)
+    )
     # Both buckets often hold the same position; count it once.
     dup = (
         (cpos[:, None] == cpos[None, :])
@@ -195,6 +241,9 @@ def _corpus_draft(
         other=-1,
     ).to(tl.int64)
     cont = tl.where(tl.cumsum((cont < 0).to(tl.int32), axis=1) == 0, cont, -1)
+    if REQUIRE_FULL:
+        full = tl.sum((cont >= 0).to(tl.int32), axis=1) == K
+        ok = ok & full
 
     # Candidates sharing a match length draft identical chains; score each
     # distinct length once.
@@ -267,13 +316,21 @@ def _suffix_finalize_kernel(
     corpus_len,
     table_ptr,  # *int64  [2, NUM_BUCKETS, SLOTS]
     drafts_ptr,  # *int64  [B, K]  (output)
+    drafts_stride,
     num_valid_ptr,  # *int32  [B]  (output)
+    match_lens_ptr,  # *int32  [B]  (output)
+    sources_ptr,  # *int32  [B]  (output)
     stats_ptr,  # *int64  [2 * _NUM_LEN_BUCKETS, K, 2]  (accepted, observed)
     last_bucket_ptr,  # *int32  [max_num_reqs]  (output)
     last_valid_ptr,  # *int32  [max_num_reqs]  (output)
     conf_ptr,  # *fp32  [B, K]  (output)
+    query_prefix_ptr,
+    query_prefix_stride,
+    QUERY_PREFIX: tl.constexpr,
     HAS_CORPUS: tl.constexpr,
     ADAPTIVE: tl.constexpr,
+    REQUIRE_FULL: tl.constexpr,
+    MIN_MATCH: tl.constexpr,
     HASH_MUL: tl.constexpr,
     NUM_BUCKETS: tl.constexpr,
     SLOTS: tl.constexpr,
@@ -309,9 +366,15 @@ def _suffix_finalize_kernel(
         g_len, g_draft, g_n = _corpus_draft(
             row,
             seq_len,
+            b,
             table_ptr,
             corpus_ptr,
             corpus_len,
+            query_prefix_ptr,
+            query_prefix_stride,
+            QUERY_PREFIX,
+            REQUIRE_FULL,
+            MIN_MATCH,
             HASH_MUL,
             NUM_BUCKETS,
             SLOTS,
@@ -335,8 +398,10 @@ def _suffix_finalize_kernel(
     # Invalid slots fall back to the last sampled token; they are verified as
     # ordinary (rejectable) drafts, so the fill value only affects efficiency.
     out = tl.where(draft_ok, draft, last_tok)
-    tl.store(drafts_ptr + b * K + k_iota, out, mask=k_mask)
+    tl.store(drafts_ptr + b * drafts_stride + k_iota, out, mask=k_mask)
     tl.store(num_valid_ptr + b, num_valid)
+    tl.store(match_lens_ptr + b, match_len)
+    tl.store(sources_ptr + b, source)
 
     if ADAPTIVE:
         # Per-position confidence for adaptive verification: the observed
@@ -576,6 +641,10 @@ class SuffixSpeculator(BaseSpeculator):
         self.num_valid = torch.zeros(
             self.max_num_reqs, dtype=torch.int32, device=device
         )
+        self.match_lens = torch.zeros(
+            self.max_num_reqs, dtype=torch.int32, device=device
+        )
+        self.sources = torch.zeros(self.max_num_reqs, dtype=torch.int32, device=device)
 
         # Adaptive verification (optional): per-slot confidences from
         # acceptance statistics learned online.
@@ -737,7 +806,12 @@ class SuffixSpeculator(BaseSpeculator):
             num_sampled,
             self.scratch,
             self.scratch.stride(0),
+            self.drafts,
+            self.drafts.stride(0),
             self.max_model_len + 1,
+            QUERY_PREFIX=0,
+            REQUIRE_FULL=False,
+            K=self.num_speculative_steps,
             MAX_DEPTH=self.max_depth,
             BLOCK=self.block_l,
             num_warps=4,
@@ -757,13 +831,21 @@ class SuffixSpeculator(BaseSpeculator):
             self.corpus.shape[0],
             self.table,
             self.drafts,
+            self.drafts.stride(0),
             self.num_valid,
+            self.match_lens,
+            self.sources,
             self.accept_stats,
             self.last_bucket,
             self.last_valid,
             self.draft_token_confidence_probs,
+            self.drafts,
+            self.drafts.stride(0),
+            QUERY_PREFIX=0,
             HAS_CORPUS=self.has_corpus,
             ADAPTIVE=self.enable_adaptive_verification,
+            REQUIRE_FULL=False,
+            MIN_MATCH=1,
             HASH_MUL=_HASH_MUL,
             NUM_BUCKETS=self.num_buckets,
             SLOTS=_BUCKET_SLOTS,
@@ -775,3 +857,87 @@ class SuffixSpeculator(BaseSpeculator):
             num_warps=4,
         )
         return self.drafts[:num_reqs]
+
+    def propose_hybrid(
+        self,
+        input_batch: InputBatch,
+        num_sampled: torch.Tensor,
+        last_sampled: torch.Tensor,
+        num_tokens: int,
+        query_prefix: torch.Tensor | None = None,
+        prefix_len: int = 0,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        token_ids = self.req_states.all_token_ids.gpu
+        total_len = self.req_states.total_len.gpu
+        idx_mapping = input_batch.idx_mapping
+        prefix = self.drafts if query_prefix is None else query_prefix
+        prefix_stride = prefix.stride(0)
+        k_po2 = max(1, triton.next_power_of_2(num_tokens))
+        min_match = getattr(
+            self.vllm_config.speculative_config, "suffix_hybrid_min_match_length", 1
+        )
+        _suffix_local_scan_kernel[(input_batch.num_reqs, self.n_blocks)](
+            token_ids,
+            token_ids.stride(0),
+            idx_mapping,
+            total_len,
+            num_sampled,
+            self.scratch,
+            self.scratch.stride(0),
+            prefix,
+            prefix_stride,
+            self.max_model_len + 1,
+            QUERY_PREFIX=prefix_len,
+            REQUIRE_FULL=True,
+            K=num_tokens,
+            MAX_DEPTH=self.max_depth,
+            BLOCK=self.block_l,
+            num_warps=4,
+        )
+        _suffix_finalize_kernel[(input_batch.num_reqs,)](
+            token_ids,
+            token_ids.stride(0),
+            idx_mapping,
+            total_len,
+            num_sampled,
+            last_sampled.view(-1),
+            self.scratch,
+            self.scratch.stride(0),
+            self.n_blocks,
+            self.max_model_len + 1,
+            self.corpus,
+            self.corpus.shape[0],
+            self.table,
+            self.drafts,
+            self.drafts.stride(0),
+            self.num_valid,
+            self.match_lens,
+            self.sources,
+            self.accept_stats,
+            self.last_bucket,
+            self.last_valid,
+            self.draft_token_confidence_probs,
+            prefix,
+            prefix_stride,
+            QUERY_PREFIX=prefix_len,
+            HAS_CORPUS=self.has_corpus,
+            ADAPTIVE=False,
+            REQUIRE_FULL=True,
+            MIN_MATCH=min_match,
+            HASH_MUL=_HASH_MUL,
+            NUM_BUCKETS=self.num_buckets,
+            SLOTS=_BUCKET_SLOTS,
+            MAX_DEPTH=self.max_depth,
+            DEPTH_PO2=triton.next_power_of_2(self.max_depth),
+            K=num_tokens,
+            K_PO2=k_po2,
+            NB_PO2=max(1, triton.next_power_of_2(self.n_blocks)),
+            num_warps=4,
+        )
+        n = input_batch.num_reqs
+        return (
+            self.drafts[:n, :num_tokens],
+            self.num_valid[:n],
+            self.match_lens[:n],
+            self.sources[:n],
+        )
