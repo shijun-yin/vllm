@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -130,6 +130,7 @@ class InputBatch:
     # [num_reqs] admitted draft counts in flight to the host. Set only under
     # adaptive verification with batch-sharded sampling, when the budget binds.
     num_admitted_draft_tokens: "AdmittedDraftCounts | None" = None
+    structured_output_req_ids: set[str] = field(default_factory=set)
 
     @classmethod
     def make_dummy(

@@ -293,7 +293,10 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         num_prefill_lookahead = max(1, vllm_config.num_prefill_lookahead_tokens)
         use_dense_all_token_ids = self.speculative_config is not None and (
             self.speculative_config.speculator_config.prefer_dense_token_history
-            or self.speculative_config.suffix_hybrid_mode != "off"
+            or (
+                self.is_last_pp_rank
+                and self.speculative_config.suffix_hybrid_mode != "off"
+            )
         )
 
         # General request states.
@@ -310,12 +313,14 @@ class GPUModelRunner(LoRAModelRunnerMixin):
 
         # Speculative decoding.
         self.speculator = None
+        self.splice = None
         self.use_aux_hidden_state_outputs = False
         if self.speculative_config is not None:
             if self.is_last_pp_rank:
                 self.speculator = init_speculator(
                     self.vllm_config, self.device, self.req_states
                 )
+                self.splice = getattr(self.speculator, "suffix_splice", None)
 
             self.use_aux_hidden_state_outputs = (
                 self.speculative_config.uses_aux_hidden_states
@@ -1283,7 +1288,16 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             # Preempted docs keep their query-use reservation until rescheduled.
             self.pooling_runner.on_requests_finished(finished_req_ids)
         if self.speculator is not None and finished_req_ids:
-            self.speculator.on_requests_finished(finished_req_ids)
+            if hasattr(self.speculator, "on_requests_finished_with_lengths"):
+                self.speculator.on_requests_finished_with_lengths(
+                    finished_req_ids, scheduler_output.finished_req_token_lengths
+                )
+            else:
+                self.speculator.on_requests_finished(finished_req_ids)
+        if self.splice is not None and finished_req_ids:
+            self.splice.on_requests_finished_with_lengths(
+                finished_req_ids, scheduler_output.finished_req_token_lengths
+            )
         preempted_req_ids = scheduler_output.preempted_req_ids
         if preempted_req_ids:
             finished_req_ids = finished_req_ids.union(preempted_req_ids)
@@ -1329,6 +1343,8 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                 self.adaptive_verification.add_request(req_index)
             if self.speculator is not None:
                 self.speculator.add_request(req_index, new_req_data)
+            if self.splice is not None:
+                self.splice.add_request(req_index, new_req_data)
 
             if self.pooling_runner is not None:
                 assert new_req_data.pooling_params is not None
@@ -1680,6 +1696,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             cu_num_logits=cu_num_logits,
             cu_num_logits_np=cu_num_logits_np,
             has_structured_output_reqs=scheduler_output.has_structured_output_requests,
+            structured_output_req_ids=scheduler_output.structured_output_req_ids,
             prompt_lens=prompt_lens,
             fast_prefill=fast_prefill,
             max_query_len=(
@@ -2420,6 +2437,8 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                 self.speculator.prepare_propose(
                     input_batch, num_sampled, num_rejected, self.sampler
                 )
+            if self.splice is not None:
+                self.splice.prepare_propose(input_batch, num_sampled, num_rejected)
             spec_hidden_states = get_drafter_hidden_states(
                 self.model, draft_hidden_states
             )
@@ -2440,10 +2459,20 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                     dp_sync_state=dp_sync_state,
                     mm_inputs=mm_inputs,
                 )
+                if self.splice is not None:
+                    draft_tokens = self.splice.postprocess(
+                        draft_tokens,
+                        input_batch,
+                        num_sampled,
+                        self.req_states.last_sampled_tokens,
+                        num_spec_tokens,
+                    )
             if self.pcp_manager is not None:
                 self.pcp_manager.sync_drafts(
                     draft_tokens, input_batch.idx_mapping, self.speculator.draft_logits
                 )
+                if self.splice is not None:
+                    self.splice.sync_drafts_metadata()
             if num_spec_tokens < self.num_speculative_steps:
                 draft_tokens[:, num_spec_tokens:] = -1
             self.req_states.draft_tokens[input_batch.idx_mapping] = draft_tokens

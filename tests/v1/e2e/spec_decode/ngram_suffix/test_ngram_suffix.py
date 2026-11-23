@@ -206,16 +206,88 @@ def test_ngram_verification_applies_logit_bias_and_min_p(
         assert num_unfiltered_below > 0
 
 
+def check_greedy_sequence_close(expected, actual, name):
+    assert len(expected) == len(actual)
+    for expected_output, actual_output in zip(expected, actual, strict=True):
+        expected_completion = expected_output.outputs[0]
+        actual_completion = actual_output.outputs[0]
+        assert len(expected_completion.token_ids) == len(actual_completion.token_ids)
+        assert expected_completion.finish_reason == actual_completion.finish_reason
+        check_logprobs_close(
+            outputs_0_lst=[
+                (
+                    expected_completion.token_ids,
+                    expected_completion.text,
+                    expected_completion.logprobs,
+                )
+            ],
+            outputs_1_lst=[
+                (
+                    actual_completion.token_ids,
+                    actual_completion.text,
+                    actual_completion.logprobs,
+                )
+            ],
+            name_0="target",
+            name_1=name,
+        )
+
+
+def check_greedy_output_close(expected, actual, name):
+    assert len(expected) == len(actual)
+    for expected_output, actual_output in zip(expected, actual, strict=True):
+        expected_completion = expected_output.outputs[0]
+        actual_completion = actual_output.outputs[0]
+        assert len(expected_completion.token_ids) == len(actual_completion.token_ids)
+        assert expected_completion.finish_reason == actual_completion.finish_reason
+        check_logprobs_close(
+            outputs_0_lst=[
+                (
+                    expected_completion.token_ids,
+                    expected_completion.text,
+                    expected_completion.logprobs,
+                )
+            ],
+            outputs_1_lst=[
+                (
+                    actual_completion.token_ids,
+                    actual_completion.text,
+                    actual_completion.logprobs,
+                )
+            ],
+            name_0="target",
+            name_1=name,
+            always_check_logprobs=True,
+        )
+        for position, (token_0, token_1) in enumerate(
+            zip(expected_completion.token_ids, actual_completion.token_ids)
+        ):
+            if token_0 != token_1:
+                break
+            logprob_0 = expected_completion.logprobs[position][token_0].logprob
+            logprob_1 = actual_completion.logprobs[position][token_1].logprob
+            assert math.isclose(logprob_0, logprob_1, rel_tol=1e-3, abs_tol=1e-3), (
+                f"{name}: logprob mismatch at {position}: {logprob_0} != {logprob_1}"
+            )
+
+
 class SpliceProbe:
     def read_splice_state(self):
-        speculator = self.model_runner.speculator
-        drafter = getattr(speculator, "drafter", None)
+        drafter = self.model_runner.speculator
+        splice = self.model_runner.splice
         observed = (
-            int(speculator.suffix_stats[..., 1].sum().item())
-            if hasattr(speculator, "suffix_stats")
+            int(splice.suffix_stats[..., 1].sum().item()) if splice is not None else 0
+        )
+        corpus_observed = (
+            int(
+                splice.suffix_stats[splice.suffix_stats.shape[0] // 2 :, ..., 1]
+                .sum()
+                .item()
+            )
+            if splice is not None
             else 0
         )
-        return type(drafter).__name__, observed
+        return type(drafter).__name__, observed, corpus_observed
 
 
 def check_splice_llm_correctness(
@@ -230,10 +302,24 @@ def check_splice_llm_correctness(
     ]
 
     def generate(runner):
-        return runner.generate_greedy_logprobs(prompts, max_tokens=48, num_logprobs=5)
+        return runner.llm.generate(
+            prompts, SamplingParams(temperature=0, max_tokens=48, logprobs=5)
+        )
 
     with vllm_runner(model, **common) as runner:
         expected = generate(runner)
+
+    native_config = {
+        key: value
+        for key, value in speculative_config.items()
+        if not key.startswith("suffix_")
+    }
+    with vllm_runner(
+        model,
+        speculative_config=native_config,
+        **common,
+    ) as runner:
+        native = generate(runner)
 
     with vllm_runner(
         model,
@@ -242,24 +328,22 @@ def check_splice_llm_correctness(
         **common,
     ) as runner:
         cold = generate(runner)
-        drafter, cold_observed = runner.llm.collective_rpc("read_splice_state")[0]
+        drafter, cold_observed, cold_corpus_observed = runner.llm.collective_rpc(
+            "read_splice_state"
+        )[0]
         hot = generate(runner)
-        _, hot_observed = runner.llm.collective_rpc("read_splice_state")[0]
+        _, hot_observed, hot_corpus_observed = runner.llm.collective_rpc(
+            "read_splice_state"
+        )[0]
 
-    check_logprobs_close(
-        outputs_0_lst=expected,
-        outputs_1_lst=cold,
-        name_0="target",
-        name_1="splice-cold",
-    )
-    check_logprobs_close(
-        outputs_0_lst=expected,
-        outputs_1_lst=hot,
-        name_0="target",
-        name_1="splice-hot",
-    )
+    check_greedy_sequence_close(expected, native, "native-drafter")
+    check_greedy_sequence_close(expected, cold, "splice-cold")
+    check_greedy_sequence_close(expected, hot, "splice-hot")
+    check_greedy_output_close(native, cold, "splice-cold")
+    check_greedy_output_close(native, hot, "splice-hot")
     assert drafter == expected_drafter
     assert hot_observed > cold_observed
+    assert hot_corpus_observed > cold_corpus_observed
 
 
 @single_gpu_only
@@ -317,4 +401,32 @@ def test_suffix_splice_dflash2_llm_correctness(vllm_runner):
             gpu_memory_utilization=0.98,
         ),
         expected_drafter="DFlash2Speculator",
+    )
+
+
+@single_gpu_only
+def test_suffix_splice_dflash_llm_correctness(vllm_runner):
+    check_splice_llm_correctness(
+        vllm_runner,
+        model="Qwen/Qwen3-4B-FP8" if current_platform.is_cuda() else "Qwen/Qwen3-4B",
+        speculative_config={
+            "method": "dflash",
+            "model": "z-lab/Qwen3-4B-DFlash-b16",
+            "num_speculative_tokens": 3,
+            "suffix_hybrid_mode": "splice",
+            "suffix_hybrid_min_match_length": 2,
+            "suffix_decoding_max_tree_depth": 8,
+            "suffix_decoding_corpus_tokens": 65536,
+        },
+        common=dict(
+            block_size=None,
+            max_model_len=512,
+            max_num_seqs=1,
+            max_num_batched_tokens=256,
+            enable_chunked_prefill=None,
+            enable_prefix_caching=False,
+            compilation_config=CompilationConfig(),
+            gpu_memory_utilization=0.9,
+        ),
+        expected_drafter="DFlashSpeculator",
     )

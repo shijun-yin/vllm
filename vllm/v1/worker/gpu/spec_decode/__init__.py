@@ -47,16 +47,14 @@ def init_speculator(
         )
     # BaseSpeculator doesn't define the constructor signature.
     factory = cast(Callable[..., "BaseSpeculator"], speculator_cls)
-    if speculative_config.suffix_hybrid_mode != "off":
-        from vllm.v1.worker.gpu.spec_decode.hybrid.speculator import HybridSpeculator
-
-        if "req_states" in inspect.signature(factory).parameters:
-            drafter = factory(vllm_config, device, req_states=req_states)
-        else:
-            drafter = factory(vllm_config, device)
-        if not isinstance(drafter, DraftModelSpeculator):
-            raise TypeError("Suffix splice requires a draft model speculator.")
-        return HybridSpeculator(vllm_config, device, req_states, drafter)
     if "req_states" in inspect.signature(factory).parameters:
-        return factory(vllm_config, device, req_states=req_states)
-    return factory(vllm_config, device)
+        speculator = factory(vllm_config, device, req_states=req_states)
+    else:
+        speculator = factory(vllm_config, device)
+    if speculative_config.suffix_hybrid_mode != "off":
+        from vllm.v1.worker.gpu.spec_decode.hybrid.speculator import SuffixSplice
+
+        if not isinstance(speculator, DraftModelSpeculator):
+            raise TypeError("Suffix splice requires a draft model speculator.")
+        speculator.suffix_splice = SuffixSplice(vllm_config, device, req_states)
+    return speculator

@@ -626,6 +626,13 @@ class SpeculativeConfig:
     """Optional minimum expected accepted draft tokens, in
     `[0, num_speculative_tokens]`."""
 
+    suffix_hybrid_stats_half_life: int = 1024
+    """Number of feedback steps before splice acceptance counts are halved."""
+
+    suffix_hybrid_exploration_interval: int = 0
+    """Invert the mature splice routing decision every N steps per batch row to
+    collect comparison samples. Zero disables exploration."""
+
     draft_load_config: LoadConfig | None = None
     """Load config for the draft model. If not specified, will use the load
     config from the target model."""
@@ -780,6 +787,8 @@ class SpeculativeConfig:
             "suffix_hybrid_min_match_length",
             "suffix_hybrid_prefix_length",
             "suffix_hybrid_min_expected_accepted",
+            "suffix_hybrid_stats_half_life",
+            "suffix_hybrid_exploration_interval",
             "draft_load_config",
             "rejection_sample_method",
             "synthetic_acceptance_rates",
@@ -1536,6 +1545,12 @@ class SpeculativeConfig:
             )
 
         if self.suffix_hybrid_mode != "off":
+            if self.num_speculative_tokens is None:
+                raise ValueError(
+                    "num_speculative_tokens must be provided with "
+                    "speculative model unless the draft model config contains an "
+                    "n_predict parameter."
+                )
             from vllm.v1.worker.gpu.spec_decode.suffix.config import (
                 validate_suffix_decoding_parameters,
             )
@@ -1594,9 +1609,11 @@ class SpeculativeConfig:
                     "suffix_hybrid_min_expected_accepted must be between zero and "
                     "num_speculative_tokens."
                 )
-            if self.suffix_hybrid_mode == "splice" and not (
-                0 < self.suffix_hybrid_prefix_length < self.num_speculative_tokens
-            ):
+            if self.suffix_hybrid_stats_half_life <= 0:
+                raise ValueError("suffix_hybrid_stats_half_life must be positive.")
+            if self.suffix_hybrid_exploration_interval < 0:
+                raise ValueError("suffix_hybrid_exploration_interval must be >= 0.")
+            if not (0 < self.suffix_hybrid_prefix_length < self.num_speculative_tokens):
                 raise ValueError(
                     "suffix_hybrid_prefix_length must be positive and smaller than "
                     "num_speculative_tokens in splice mode."

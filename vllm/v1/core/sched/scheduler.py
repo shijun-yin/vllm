@@ -1900,6 +1900,8 @@ class Scheduler(SchedulerInterface):
             scheduler_output.has_structured_output_requests |= (
                 request.use_structured_output and not request.is_prefill_chunk
             )
+            if request.use_structured_output and not request.is_prefill_chunk:
+                scheduler_output.structured_output_req_ids.add(req_id)
             # Drop from the in-flight-prefill set once it's no longer prefilling.
             if not request.is_prefill_chunk:
                 self._inflight_prefills.discard(request)
@@ -2582,8 +2584,12 @@ class Scheduler(SchedulerInterface):
                 # Capture finish_reason BEFORE _handle_stopped_request, which may
                 # reset the status to WAITING for streaming requests that continue.
                 finish_reason = request.get_finished_reason()
+                final_token_length = request.num_tokens
                 finished = self._handle_stopped_request(request)
                 if finished:
+                    scheduler_output.finished_req_token_lengths[req_id] = (
+                        final_token_length
+                    )
                     kv_transfer_params, ec_transfer_params = self._free_request(request)
                     if (
                         prefill_stats is not None

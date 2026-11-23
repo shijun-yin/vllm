@@ -109,8 +109,19 @@ ranking them. Splice keeps the model chain when its tail is identical to the
 historical tail, so acceptance feedback is attributed to the model chain.
 
 Acceptance statistics are indexed by source, match-length bucket, and absolute
-draft position. Set `suffix_hybrid_min_expected_accepted` to add an expected
-acceptance threshold after the statistics mature.
+draft position. Model and suffix comparisons use the same candidate bucket when
+one is available. Model maturity is evaluated at the first replaced position.
+Structured-output rows keep their model drafts and do not update these
+statistics; other rows continue to provide feedback. Lookup scans are bounded by
+the current batch's history-length upper bound, not just `max_model_len`.
+Finished-request corpus ingestion uses the scheduler's final trimmed token
+length. Set `suffix_hybrid_min_expected_accepted` to add an expected acceptance
+threshold after the statistics mature. Counts are halved every
+`suffix_hybrid_stats_half_life` feedback steps (default 1024).
+`suffix_hybrid_exploration_interval` is disabled by default. A positive interval
+N inverts the mature routing decision every N steps per batch row, collecting
+fresh comparison samples for both routes. Exploration still requires a valid
+full-length candidate and can override the expected-acceptance threshold.
 
 Splice requires greedy drafting and standard verification. It does not support
 adaptive verification, `prefill_context_kv_only`, watermarking, DBO, or

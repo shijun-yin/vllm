@@ -285,9 +285,15 @@ class SchedulerOutput:
     # Only used for v2 model runner.
     preempted_req_ids: set[str] | None = None
 
+    # Final scheduler-trimmed lengths for suffix-corpus ingestion.
+    finished_req_token_lengths: dict[str, int] = field(default_factory=dict)
+
     # Whether any of the scheduled requests use structured output.
     # Set only in async scheduling case.
     has_structured_output_requests: bool = False
+    # Request IDs with active structured output constraints, for per-request
+    # speculative-decoding feedback masks.
+    structured_output_req_ids: set[str] = field(default_factory=set)
 
     # Whether any scheduled request uses structured output with speculative
     # decoding. Set only in async scheduling case.

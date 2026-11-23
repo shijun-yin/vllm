@@ -1333,6 +1333,19 @@ def test_suffix_hybrid_requires_model_drafter():
         SpeculativeConfig(method="suffix", suffix_hybrid_mode="splice")
 
 
+def test_suffix_splice_rejects_missing_dflash_width():
+    with pytest.raises(ValueError, match="num_speculative_tokens must be provided"):
+        SpeculativeConfig(method="dflash", suffix_hybrid_mode="splice")
+
+
+def test_suffix_splice_rejects_dbo(tmp_path):
+    with pytest.raises(ValueError, match="does not support DBO"):
+        _make_dflash2_spec(
+            tmp_path,
+            target_parallel_config=ParallelConfig(enable_dbo=True),
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value", "match"),
     [
@@ -1342,13 +1355,9 @@ def test_suffix_hybrid_requires_model_drafter():
         ("suffix_decoding_max_cached_requests", -1, "must be >= 0"),
     ],
 )
-def test_suffix_hybrid_validates_suffix_limits(field, value, match):
+def test_suffix_hybrid_validates_suffix_limits(tmp_path, field, value, match):
     with pytest.raises(ValueError, match=match):
-        SpeculativeConfig(
-            method="suffix",
-            suffix_hybrid_mode="splice",
-            **{field: value},
-        )
+        _make_dflash2_spec(tmp_path, **{field: value})
 
 
 def test_model_runner_supports_custom_logits_processors():
@@ -2781,6 +2790,8 @@ def test_dflash2_splice_allows_async_scheduling(
         ),
         ({"suffix_hybrid_min_expected_accepted": -0.1}, "min_expected_accepted"),
         ({"suffix_hybrid_min_expected_accepted": 3.1}, "min_expected_accepted"),
+        ({"suffix_hybrid_stats_half_life": 0}, "stats_half_life"),
+        ({"suffix_hybrid_exploration_interval": -1}, "exploration_interval"),
         ({"draft_sample_method": "probabilistic"}, "greedy drafting"),
         ({"rejection_sample_method": "synthetic"}, "standard target verification"),
         ({"enable_adaptive_verification": True}, "does not support adaptive"),

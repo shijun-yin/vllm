@@ -2182,6 +2182,9 @@ def test_stop_via_update_from_output():
     assert requests[0].request_id in scheduler.finished_req_ids
     assert list(requests[0].output_token_ids) == [10, 42]
     assert list(requests[1].output_token_ids) == [13, 14]
+    assert scheduler_output.finished_req_token_lengths == {
+        requests[0].request_id: requests[0].num_tokens
+    }
 
     # Test case 3: Stop on max tokens
     scheduler = create_scheduler(num_speculative_tokens=2)

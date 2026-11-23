@@ -792,6 +792,8 @@ def _warmup_kernels(
     if model_runner.speculator is not None:
         # Reset state for drafters that learn across requests.
         model_runner.speculator.reset_state()
+    if model_runner.splice is not None:
+        model_runner.splice.reset_state()
     model_runner.kv_connector.set_disabled(False)
     if model_runner.kv_block_zeroer is not None:
         model_runner.kv_block_zeroer.zero_block_ids([0])

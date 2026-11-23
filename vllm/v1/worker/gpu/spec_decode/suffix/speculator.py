@@ -694,6 +694,11 @@ class SuffixSpeculator(BaseSpeculator):
         return None
 
     def on_requests_finished(self, finished_req_ids: Iterable[str]) -> None:
+        self.on_requests_finished_with_lengths(finished_req_ids, {})
+
+    def on_requests_finished_with_lengths(
+        self, finished_req_ids: Iterable[str], final_token_lengths: dict[str, int]
+    ) -> None:
         """Add finished responses to the corpus before their slots are freed."""
         if not self.has_corpus:
             return
@@ -724,6 +729,13 @@ class SuffixSpeculator(BaseSpeculator):
         self.num_docs += num_docs
         docs_gpu = async_tensor_h2d(docs, self.device, torch.int32)
         token_ids = self.req_states.all_token_ids.gpu
+        ingest_end = req_states.total_len.gpu
+        if final_token_lengths:
+            ingest_end = ingest_end.clone()
+            for req_id, final_len in final_token_lengths.items():
+                slot = req_states.req_id_to_index.get(req_id)
+                if slot is not None:
+                    ingest_end[slot] = final_len
         _suffix_ingest_kernel[
             (num_docs, triton.cdiv(self.max_model_len, _INGEST_BLOCK))
         ](
@@ -731,7 +743,7 @@ class SuffixSpeculator(BaseSpeculator):
             token_ids.stride(0),
             docs_gpu,
             num_docs,
-            req_states.total_len.gpu,
+            ingest_end,
             self.corpus,
             self.corpus_len,
             self.corpus_head,
@@ -748,135 +760,30 @@ class SuffixSpeculator(BaseSpeculator):
         self.corpus_head.copy_(self.ingest_out[0:1])
         self.doc_seq.copy_(self.ingest_out[1:2])
 
-    @torch.inference_mode()
-    def propose(
-        self,
-        input_batch: InputBatch,
-        attn_metadata: Any,
-        slot_mappings: Any,
-        last_hidden_states: torch.Tensor,
-        aux_hidden_states: list[torch.Tensor] | None,
-        num_sampled: torch.Tensor,
-        num_rejected: torch.Tensor,
-        last_sampled: torch.Tensor,
-        next_prefill_tokens: torch.Tensor,
-        temperature: torch.Tensor,
-        seeds: torch.Tensor,
-        dp_sync_state: DPSyncState | None = None,
-        dummy_run: bool = False,
-        skip_attn_for_dummy_run: bool = False,
-        mm_inputs: tuple[list[torch.Tensor], torch.Tensor] | None = None,
-        is_profile: bool = False,
-        num_speculative_tokens: int | None = None,
-    ) -> torch.Tensor:
-        num_reqs = input_batch.num_reqs
-        if dummy_run:
-            return self.drafts[:num_reqs]
-
-        token_ids = self.req_states.all_token_ids.gpu
-        total_len = self.req_states.total_len.gpu
-        idx_mapping = input_batch.idx_mapping
-        k_po2 = max(1, triton.next_power_of_2(self.num_speculative_steps))
-
-        if self.enable_adaptive_verification:
-            if self.new_slots:
-                slots = async_tensor_h2d(self.new_slots, self.device, torch.int64)
-                self.last_bucket.index_fill_(0, slots, -1)
-                self.new_slots.clear()
-            _suffix_observe_kernel[(num_reqs,)](
-                idx_mapping,
-                num_sampled,
-                num_rejected,
-                self.accept_stats,
-                self.last_bucket,
-                self.last_valid,
-                K=self.num_speculative_steps,
-                K_PO2=k_po2,
-                num_warps=1,
-            )
-            self.num_steps += 1
-            if self.num_steps % _STATS_HALF_LIFE == 0:
-                self.accept_stats.bitwise_right_shift_(1)
-
-        _suffix_local_scan_kernel[(num_reqs, self.n_blocks)](
-            token_ids,
-            token_ids.stride(0),
-            idx_mapping,
-            total_len,
-            num_sampled,
-            self.scratch,
-            self.scratch.stride(0),
-            self.drafts,
-            self.drafts.stride(0),
-            self.max_model_len + 1,
-            QUERY_PREFIX=0,
-            REQUIRE_FULL=False,
-            K=self.num_speculative_steps,
-            MAX_DEPTH=self.max_depth,
-            BLOCK=self.block_l,
-            num_warps=4,
+    def _num_scan_blocks(self, input_batch: InputBatch, prefix_len: int) -> int:
+        max_history_len = int(
+            input_batch.seq_lens_cpu_upper_bound[: input_batch.num_reqs].max().item()
         )
-        _suffix_finalize_kernel[(num_reqs,)](
-            token_ids,
-            token_ids.stride(0),
-            idx_mapping,
-            total_len,
-            num_sampled,
-            last_sampled.view(-1),
-            self.scratch,
-            self.scratch.stride(0),
-            self.n_blocks,
-            self.max_model_len + 1,
-            self.corpus,
-            self.corpus.shape[0],
-            self.table,
-            self.drafts,
-            self.drafts.stride(0),
-            self.num_valid,
-            self.match_lens,
-            self.sources,
-            self.accept_stats,
-            self.last_bucket,
-            self.last_valid,
-            self.draft_token_confidence_probs,
-            self.drafts,
-            self.drafts.stride(0),
-            QUERY_PREFIX=0,
-            HAS_CORPUS=self.has_corpus,
-            ADAPTIVE=self.enable_adaptive_verification,
-            REQUIRE_FULL=False,
-            MIN_MATCH=1,
-            HASH_MUL=_HASH_MUL,
-            NUM_BUCKETS=self.num_buckets,
-            SLOTS=_BUCKET_SLOTS,
-            MAX_DEPTH=self.max_depth,
-            DEPTH_PO2=triton.next_power_of_2(self.max_depth),
-            K=self.num_speculative_steps,
-            K_PO2=k_po2,
-            NB_PO2=max(1, triton.next_power_of_2(self.n_blocks)),
-            num_warps=4,
-        )
-        return self.drafts[:num_reqs]
+        active_len = min(self.max_model_len, max_history_len + prefix_len)
+        return triton.cdiv(max(active_len, 1), self.block_l)
 
-    def propose_hybrid(
+    def _query(
         self,
         input_batch: InputBatch,
         num_sampled: torch.Tensor,
         last_sampled: torch.Tensor,
         num_tokens: int,
-        query_prefix: torch.Tensor | None = None,
-        prefix_len: int = 0,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        query_prefix: torch.Tensor,
+        prefix_len: int,
+        require_full: bool,
+        min_match: int,
+        adaptive: bool,
+    ) -> torch.Tensor:
         token_ids = self.req_states.all_token_ids.gpu
         total_len = self.req_states.total_len.gpu
         idx_mapping = input_batch.idx_mapping
-        prefix = self.drafts if query_prefix is None else query_prefix
-        prefix_stride = prefix.stride(0)
-        k_po2 = max(1, triton.next_power_of_2(num_tokens))
-        min_match = getattr(
-            self.vllm_config.speculative_config, "suffix_hybrid_min_match_length", 1
-        )
-        _suffix_local_scan_kernel[(input_batch.num_reqs, self.n_blocks)](
+        num_scan_blocks = self._num_scan_blocks(input_batch, prefix_len)
+        _suffix_local_scan_kernel[(input_batch.num_reqs, num_scan_blocks)](
             token_ids,
             token_ids.stride(0),
             idx_mapping,
@@ -884,11 +791,11 @@ class SuffixSpeculator(BaseSpeculator):
             num_sampled,
             self.scratch,
             self.scratch.stride(0),
-            prefix,
-            prefix_stride,
+            query_prefix,
+            query_prefix.stride(0),
             self.max_model_len + 1,
             QUERY_PREFIX=prefix_len,
-            REQUIRE_FULL=True,
+            REQUIRE_FULL=require_full,
             K=num_tokens,
             MAX_DEPTH=self.max_depth,
             BLOCK=self.block_l,
@@ -917,12 +824,12 @@ class SuffixSpeculator(BaseSpeculator):
             self.last_bucket,
             self.last_valid,
             self.draft_token_confidence_probs,
-            prefix,
-            prefix_stride,
+            query_prefix,
+            query_prefix.stride(0),
             QUERY_PREFIX=prefix_len,
             HAS_CORPUS=self.has_corpus,
-            ADAPTIVE=False,
-            REQUIRE_FULL=True,
+            ADAPTIVE=adaptive,
+            REQUIRE_FULL=require_full,
             MIN_MATCH=min_match,
             HASH_MUL=_HASH_MUL,
             NUM_BUCKETS=self.num_buckets,
@@ -930,14 +837,92 @@ class SuffixSpeculator(BaseSpeculator):
             MAX_DEPTH=self.max_depth,
             DEPTH_PO2=triton.next_power_of_2(self.max_depth),
             K=num_tokens,
-            K_PO2=k_po2,
-            NB_PO2=max(1, triton.next_power_of_2(self.n_blocks)),
+            K_PO2=max(1, triton.next_power_of_2(num_tokens)),
+            NB_PO2=max(1, triton.next_power_of_2(num_scan_blocks)),
             num_warps=4,
         )
-        n = input_batch.num_reqs
-        return (
-            self.drafts[:n, :num_tokens],
-            self.num_valid[:n],
-            self.match_lens[:n],
-            self.sources[:n],
+        return self.drafts[: input_batch.num_reqs]
+
+    @torch.inference_mode()
+    def propose(
+        self,
+        input_batch: InputBatch,
+        attn_metadata: Any,
+        slot_mappings: Any,
+        last_hidden_states: torch.Tensor,
+        aux_hidden_states: list[torch.Tensor] | None,
+        num_sampled: torch.Tensor,
+        num_rejected: torch.Tensor,
+        last_sampled: torch.Tensor,
+        next_prefill_tokens: torch.Tensor,
+        temperature: torch.Tensor,
+        seeds: torch.Tensor,
+        dp_sync_state: DPSyncState | None = None,
+        dummy_run: bool = False,
+        skip_attn_for_dummy_run: bool = False,
+        mm_inputs: tuple[list[torch.Tensor], torch.Tensor] | None = None,
+        is_profile: bool = False,
+        num_speculative_tokens: int | None = None,
+    ) -> torch.Tensor:
+        num_reqs = input_batch.num_reqs
+        if dummy_run:
+            return self.drafts[:num_reqs]
+
+        idx_mapping = input_batch.idx_mapping
+        k_po2 = max(1, triton.next_power_of_2(self.num_speculative_steps))
+
+        if self.enable_adaptive_verification:
+            if self.new_slots:
+                slots = async_tensor_h2d(self.new_slots, self.device, torch.int64)
+                self.last_bucket.index_fill_(0, slots, -1)
+                self.new_slots.clear()
+            _suffix_observe_kernel[(num_reqs,)](
+                idx_mapping,
+                num_sampled,
+                num_rejected,
+                self.accept_stats,
+                self.last_bucket,
+                self.last_valid,
+                K=self.num_speculative_steps,
+                K_PO2=k_po2,
+                num_warps=1,
+            )
+            self.num_steps += 1
+            if self.num_steps % _STATS_HALF_LIFE == 0:
+                self.accept_stats.bitwise_right_shift_(1)
+
+        return self._query(
+            input_batch,
+            num_sampled,
+            last_sampled,
+            self.num_speculative_steps,
+            self.drafts,
+            prefix_len=0,
+            require_full=False,
+            min_match=1,
+            adaptive=self.enable_adaptive_verification,
         )
+
+    def propose_hybrid(
+        self,
+        input_batch: InputBatch,
+        num_sampled: torch.Tensor,
+        last_sampled: torch.Tensor,
+        num_tokens: int,
+        query_prefix: torch.Tensor,
+        prefix_len: int,
+    ) -> torch.Tensor:
+        spec = self.vllm_config.speculative_config
+        assert spec is not None
+        drafts = self._query(
+            input_batch,
+            num_sampled,
+            last_sampled,
+            num_tokens,
+            query_prefix,
+            prefix_len,
+            require_full=True,
+            min_match=spec.suffix_hybrid_min_match_length,
+            adaptive=False,
+        )
+        return drafts[:, :num_tokens]

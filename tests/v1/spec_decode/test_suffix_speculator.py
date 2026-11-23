@@ -10,9 +10,10 @@ import torch
 
 from vllm.platforms import current_platform
 
-if not current_platform.is_cuda():
-    pytest.skip("requires CUDA", allow_module_level=True)
+if not current_platform.is_cuda_alike():
+    pytest.skip("requires a CUDA-like GPU", allow_module_level=True)
 
+from vllm.v1.worker.gpu.input_batch import InputBatch, InputBuffers  # noqa: E402
 from vllm.v1.worker.gpu.spec_decode.suffix.speculator import (  # noqa: E402
     SuffixSpeculator,
 )
@@ -83,7 +84,7 @@ def _finish(spec, req_states, slot_by_id):
     spec.on_requests_finished(list(slot_by_id))
 
 
-def _propose(spec, req_states, slots, num_sampled=None, num_rejected=None):
+def _propose(spec, req_states, slots, num_sampled=None, num_rejected=None, hybrid=None):
     n = len(slots)
     max_reqs = req_states.total_len.gpu.shape[0]
     last_sampled = torch.zeros(max_reqs, 1, dtype=torch.int64, device=DEVICE)
@@ -94,24 +95,41 @@ def _propose(spec, req_states, slots, num_sampled=None, num_rejected=None):
         num_reqs=n,
         idx_mapping=torch.tensor(slots, dtype=torch.int32, device=DEVICE),
         idx_mapping_np=np.array(slots),
+        seq_lens_cpu_upper_bound=torch.tensor(
+            [int(req_states.total_len.gpu[slot]) for slot in slots],
+            dtype=torch.int32,
+            device=DEVICE,
+        ),
     )
     if num_sampled is None:
         num_sampled = [1] * n
     if num_rejected is None:
         num_rejected = [0] * n
-    drafts = spec.propose(
-        batch,
-        None,
-        None,
-        None,
-        None,
-        torch.tensor(num_sampled, dtype=torch.int32, device=DEVICE),
-        torch.tensor(num_rejected, dtype=torch.int32, device=DEVICE),
-        last_sampled,
-        None,
-        None,
-        None,
-    )
+    sampled = torch.tensor(num_sampled, dtype=torch.int32, device=DEVICE)
+    if hybrid is None:
+        drafts = spec.propose(
+            batch,
+            None,
+            None,
+            None,
+            None,
+            sampled,
+            torch.tensor(num_rejected, dtype=torch.int32, device=DEVICE),
+            last_sampled,
+            None,
+            None,
+            None,
+        )
+    else:
+        query_prefix, prefix_len, num_tokens = hybrid
+        drafts = spec.propose_hybrid(
+            batch,
+            sampled,
+            last_sampled,
+            num_tokens,
+            query_prefix=query_prefix,
+            prefix_len=prefix_len,
+        )
     return drafts.cpu().numpy(), spec.num_valid[:n].cpu().numpy()
 
 
@@ -467,3 +485,24 @@ def test_reused_slot_does_not_inherit_verification_stats():
 def test_short_tree_depth_disables_the_corpus():
     spec, _ = _make(3, 1, 2, 64, corpus_tokens=1024)
     assert not spec.has_corpus
+
+
+def test_scan_blocks_follow_history_upper_bound():
+    spec, _ = _make(2, 8, 1, 1024, corpus_tokens=0)
+    batch = InputBatch.make_dummy(1, 32, InputBuffers(1, 1024, device=DEVICE))
+    assert spec._num_scan_blocks(batch, 0) == 1
+    assert spec._num_scan_blocks(batch, 2) == 1
+    batch.seq_lens_cpu_upper_bound.fill_(1024)
+    assert spec._num_scan_blocks(batch, 0) == 4
+
+
+def test_corpus_ingestion_uses_scheduler_trimmed_length():
+    spec, req_states = _make(3, 8, 1, 64, corpus_tokens=1024)
+    _set(req_states, 0, [1, 2], [7, 8, 9, 10])
+    req_states.req_id_to_index = {"done": 0}
+
+    spec.on_requests_finished_with_lengths(["done"], {"done": 4})
+
+    assert spec.corpus[:5].cpu().tolist() == [1, 2, 7, 8, -1]
+    assert 9 not in spec.corpus
+    assert 10 not in spec.corpus
