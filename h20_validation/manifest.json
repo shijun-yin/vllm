@@ -1,15 +1,15 @@
 {
-  "commit": "35359f5470abde253437cf1277147c5839cbedd0",
+  "commit": "41b17fa4ef46c9a7b469b944ef621b755ebb0cb7",
   "base": "bf151b7eb1403d3671200e0cd19ad9821fe4320f",
   "branch": "experiment/suffix-splice",
   "remote": "dev",
-  "h20_status": "current smoke, batch=4, concurrency, corpus and MTP7 completed; legacy results recovered",
+  "h20_status": "H20 results archived for 35359f54; latest boundary fixes and lookup optimizations validated locally",
   "target_revision": "c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
   "drafter_revision": "015e795645c74b1a0eeef3b570031fb62e769bc5",
   "files": {
     "DATASETS.md": "340ecc8529b8c3110fd5ee03111a726173198db27ec207525692237f322223e9",
-    "README.md": "7ea94375cc494ffdaa9db3fd0fbed3c2f1c8b588a624dd37edc75903facb8a14",
-    "benchmark_splice.py": "c6626a819b1e926f88e34345f587f7791c541f7e65e6f011ffd2698996d185d8",
+    "README.md": "036c0874e3810b5abd3cccb90ef2301ab5cde04363fcf69a25fc85c906ccf253",
+    "benchmark_splice.py": "71e29437ee330c9867950da5524d4357c1138eadbd28552b0b45b539b06b5a50",
     "datasets.json": "4a9d6a517fe399207c59d1f030e46b7135e3b06d0d6969d1bbbef7f49e776cd1",
     "local_j_selection.json": "569b1fd3e2ce2b69b457b89f60ba77f57c31d02fe39e311475afde8c4c762bd6",
     "local_j_sweep.sh": "0e5fb5ed26c1c95f0eabb6955158e7b0c700ae2860f36ac35eadb56ae4101cb8",
@@ -20,7 +20,7 @@
     "remote_setup.sh": "bcdde00d2ae4ce4b110b34420612994605f1684546e225d9fac40d86ef3f10db",
     "remote_smoke.sh": "a0003ae043ad228fd9aee5815c966b53aa1036d97a3020de4e79428c6573156e",
     "select_j.py": "76c9d6bc212840c780da40b0e1bdb11f02e983a463203ab7c0cddd4a3f79a71a",
-    "suffix_splice.patch": "95f4eaa12371794f0ab96f4f50aef013fe8168afec58db4537e7a46528833fcf",
-    "summarize_results.py": "dc87a62decd66e9cdedcca6068470f0dfe457928e794b525f9ac2f70477d3bdf"
+    "suffix_splice.patch": "5cf29bbdb4002ebcfe9c98260444e09174544c0b14eb58bbc7dc1e2e23686ac9",
+    "summarize_results.py": "a56b7f5ed4f2af260b6e383d9d85d34835ecf2751f75263d00d65633edd8cc31"
   }
 }

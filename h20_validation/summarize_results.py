@@ -40,6 +40,7 @@ def main():
         "target_revision",
         "draft_revision",
         "num_speculative_tokens",
+        "corpus_key_mode",
         "temperature",
         "top_p",
         "top_k",

@@ -34,6 +34,7 @@ no-spec 对应结果：Blazedit 热态约 88.57 token/s，SPEED coding 热态约
 ## 当前 H20 复跑：已确认阶段结果
 
 当前实现使用同一 27B target、DFlash2、K=7、j=1 和官方默认采样，环境、源码与模型均从旧盘复用。
+本节 H20 数据对应提交 `35359f54`，早于下节最新边界修复；最新代码的 H20 复测仍需新设备。
 batch=4 已完成两轮独立 pure/splice，结果如下：
 
 | Dataset | 第一轮 Delta | 第二轮 Delta | Pure AL | Splice AL |
@@ -44,7 +45,9 @@ batch=4 已完成两轮独立 pure/splice，结果如下：
 
 batch=1 的 Blazedit/coding/RAG Delta 分别为 +0.08%、-1.83%、-1.80%。
 batch=16 分别为 +1.80%、-22.16%、-8.82%；batch=32 分别为 +1.76%、-22.06%、-9.22%。
-高并发下固定 K 的验证成本仍使 coding/RAG 明显退化，不能用 batch=4 的收益外推。
+高并发下 coding/RAG 明显退化，不能用 batch=4 的收益外推。计数显示有效 K 始终为 7，
+退化不能简单归因为验证了更多 draft token；历史命中后的查询/选链、候选质量和尾批调度
+共同作用，现有整波数据不能给出各 kernel 的精确占比。
 语料 0 时 Blazedit/RAG Delta 分别为 -0.07%、+8.41%；128K 时分别为 +1.96%、+4.48%。
 Blazedit 的收益依赖跨请求历史，RAG 在仅请求内历史时已有明显复用，扩用语料后收益
 仍存在但幅度下降。所有阶段的 JSON、日志和汇总均以 `current_` 为前缀保存在 `current_h20/`。
@@ -67,6 +70,25 @@ K=15、j=1、batch=4、64K corpus、temperature=0.8、自然 EOS。每类 16 条
 两轮结果表明 Blazedit 和 SPEED RAG 有稳定收益，SPEED coding 仅处于噪声区间。
 这是固定请求重放下的本地热态结果，不代表所有线上负载；未将 cold 或单次最优值
 作为稳定吞吐结论。两轮 JSON、日志和汇总均以 `refactor_` 为前缀保存在本目录。
+
+## 边界修复与查询优化后的本地配对
+
+后续审查发现的陈旧 scratch、跨轮停止长度和动态 K 归因已修复；新增无效行短路、
+空 corpus 跳过、无完整尾部块退出、本地最大匹配短路及最长档投票直达。采样验证
+覆盖结构化回退和非结构化真实换尾的 sync/async 分布及 target logprobs。
+
+本地仍使用 RTX 4070、标准 DFlash K=15、B4、64K corpus、temperature=0.8。
+以下为两轮 hot 合计吞吐相对 pure 的变化：
+
+| Dataset | 双桶第一轮 | 双桶第二轮 | 4-only | 4 未命中回查 |
+|---|---:|---:|---:|---:|
+| Blazedit | +28.34% | +9.75% | +5.80% | +10.86% |
+| SPEED coding | -2.84% | +0.30% | 未测 | 未测 |
+| SPEED RAG | +31.31% | +22.11% | +15.20% | +18.07% |
+
+默认保持 `dual`，4-only/回查只作显式消融。两轮波动较大，不将单轮最高值当作稳定收益。
+这些是最新修复后的本地 B4 热态结果，不替代高 batch 复测。对应 JSON、日志和汇总以
+`optimized_` 为前缀保存在本目录。
 
 ## 文件
 

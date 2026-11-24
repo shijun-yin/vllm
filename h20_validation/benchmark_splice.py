@@ -219,6 +219,11 @@ def main():
     parser.add_argument("--num-speculative-tokens", type=int)
     parser.add_argument("--prefix-len", type=int, default=1)
     parser.add_argument("--corpus-tokens", type=int, default=65536)
+    parser.add_argument(
+        "--corpus-key-mode",
+        choices=["dual", "four", "four_fallback"],
+        default="dual",
+    )
     parser.add_argument("--target-model")
     parser.add_argument("--draft-model")
     parser.add_argument("--target-revision")
@@ -289,6 +294,7 @@ def main():
                 suffix_hybrid_mode="splice",
                 suffix_hybrid_prefix_length=args.prefix_len,
                 suffix_hybrid_min_match_length=4,
+                suffix_hybrid_corpus_key_mode=args.corpus_key_mode,
             )
 
     llm = LLM(
@@ -337,6 +343,7 @@ def main():
         "max_tokens": args.max_tokens,
         "prefix_len": args.prefix_len,
         "corpus_tokens": args.corpus_tokens,
+        "corpus_key_mode": args.corpus_key_mode,
         "batch_size": args.batch_size,
         "max_model_len": args.max_model_len,
         "gpu_memory_utilization": args.gpu_memory_utilization,
