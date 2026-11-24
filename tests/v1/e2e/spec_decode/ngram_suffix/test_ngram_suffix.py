@@ -291,7 +291,12 @@ class SpliceProbe:
 
 
 def check_splice_llm_correctness(
-    vllm_runner, model, speculative_config, common, expected_drafter
+    vllm_runner,
+    model,
+    speculative_config,
+    common,
+    expected_drafter,
+    strict_logprobs=True,
 ):
     prompts = [
         (
@@ -339,8 +344,9 @@ def check_splice_llm_correctness(
     check_greedy_sequence_close(expected, native, "native-drafter")
     check_greedy_sequence_close(expected, cold, "splice-cold")
     check_greedy_sequence_close(expected, hot, "splice-hot")
-    check_greedy_output_close(native, cold, "splice-cold")
-    check_greedy_output_close(native, hot, "splice-hot")
+    if strict_logprobs:
+        check_greedy_output_close(native, cold, "splice-cold")
+        check_greedy_output_close(native, hot, "splice-hot")
     assert drafter == expected_drafter
     assert hot_observed > cold_observed
     assert hot_corpus_observed > cold_corpus_observed
@@ -371,8 +377,9 @@ def test_suffix_splice_mtp_llm_correctness(vllm_runner):
     )
 
 
+@pytest.mark.parametrize("max_num_seqs", [1, 2])
 @single_gpu_only
-def test_suffix_splice_dflash2_llm_correctness(vllm_runner):
+def test_suffix_splice_dflash2_llm_correctness(vllm_runner, max_num_seqs):
     check_splice_llm_correctness(
         vllm_runner,
         model=(
@@ -392,7 +399,7 @@ def test_suffix_splice_dflash2_llm_correctness(vllm_runner):
         common=dict(
             block_size=None,
             max_model_len=512,
-            max_num_seqs=1,
+            max_num_seqs=max_num_seqs,
             max_num_batched_tokens=256,
             language_model_only=True,
             enable_chunked_prefill=None,
@@ -401,6 +408,9 @@ def test_suffix_splice_dflash2_llm_correctness(vllm_runner):
             gpu_memory_utilization=0.98,
         ),
         expected_drafter="DFlash2Speculator",
+        # GDN attention has no batch-invariant mode. Keep exact numerical
+        # logprob checks for the single-request case and near-tie checks at two.
+        strict_logprobs=max_num_seqs == 1,
     )
 
 
@@ -421,7 +431,7 @@ def test_suffix_splice_dflash_llm_correctness(vllm_runner):
         common=dict(
             block_size=None,
             max_model_len=512,
-            max_num_seqs=1,
+            max_num_seqs=2,
             max_num_batched_tokens=256,
             enable_chunked_prefill=None,
             enable_prefix_caching=False,

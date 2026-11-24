@@ -633,6 +633,11 @@ class SpeculativeConfig:
     """Invert the mature splice routing decision every N steps per batch row to
     collect comparison samples. Zero disables exploration."""
 
+    suffix_hybrid_corpus_key_mode: Literal["dual", "four", "four_fallback"] = "dual"
+    """Experimental corpus lookup strategy. `four` uses only the 4-token table;
+    `four_fallback` checks the 2-token table only when the 4-token lookup has no
+    valid candidate. Both can change candidates and are intended for ablation."""
+
     draft_load_config: LoadConfig | None = None
     """Load config for the draft model. If not specified, will use the load
     config from the target model."""
@@ -789,6 +794,7 @@ class SpeculativeConfig:
             "suffix_hybrid_min_expected_accepted",
             "suffix_hybrid_stats_half_life",
             "suffix_hybrid_exploration_interval",
+            "suffix_hybrid_corpus_key_mode",
             "draft_load_config",
             "rejection_sample_method",
             "synthetic_acceptance_rates",

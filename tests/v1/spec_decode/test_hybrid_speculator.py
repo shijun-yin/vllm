@@ -232,11 +232,21 @@ def test_splice_structured_output_skips_only_masked_rows():
     assert last_valid.tolist() == [0, 0]
 
 
-def run_suffix_query(history, num_tokens, prefix=(), docs=(), min_match=4, max_len=64):
+def run_suffix_query(
+    history,
+    num_tokens,
+    prefix=(),
+    docs=(),
+    min_match=4,
+    max_len=64,
+    key_mode="dual",
+):
     spec, req_states = _make(
         num_tokens, 8, 1, max_len, corpus_tokens=1024 if docs else 0
     )
     spec.vllm_config.speculative_config.suffix_hybrid_min_match_length = min_match
+    spec.vllm_config.speculative_config.suffix_hybrid_corpus_key_mode = key_mode
+    spec.corpus_key_mode = {"dual": 0, "four": 1, "four_fallback": 2}[key_mode]
     for index, doc in enumerate(docs):
         _set(req_states, 0, [], doc)
         req_states.req_id_to_index = {f"doc-{index}": 0}
@@ -306,3 +316,30 @@ def test_splice_prefix_does_not_read_past_history_allocation():
         0,
         0,
     )
+
+
+def test_splice_corpus_key_mode_ablation():
+    dual = run_suffix_query(
+        [9, 1, 2], 2, docs=[[1, 2, 30, 31]], min_match=2, key_mode="dual"
+    )
+    four = run_suffix_query(
+        [9, 1, 2], 2, docs=[[1, 2, 30, 31]], min_match=2, key_mode="four"
+    )
+    fallback = run_suffix_query(
+        [9, 1, 2],
+        2,
+        docs=[[1, 2, 30, 31]],
+        min_match=2,
+        key_mode="four_fallback",
+    )
+    assert dual == fallback == ([30, 31], 2, 2)
+    assert four[1:] == (0, 0)
+
+    for mode in ("dual", "four", "four_fallback"):
+        assert run_suffix_query(
+            [9, 1, 2, 3, 4],
+            2,
+            docs=[[1, 2, 3, 4, 30, 31]],
+            min_match=2,
+            key_mode=mode,
+        ) == ([30, 31], 2, 4)

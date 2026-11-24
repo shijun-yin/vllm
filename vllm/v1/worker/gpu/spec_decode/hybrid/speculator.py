@@ -144,8 +144,7 @@ def _hybrid_route_publish_kernel(
     out = tl.where(take_suffix, suffix, model)
     tl.store(output_ptr + b * output_stride + k, out, mask=mask)
     tl.store(last_use_suffix_ptr + req, use_suffix)
-    has_candidate = (tl.load(num_valid_ptr + b) >= required) & (match_len >= MIN_MATCH)
-    tl.store(last_buckets_ptr + req, tl.where(has_candidate, bucket, -1))
+    tl.store(last_buckets_ptr + req, tl.where(valid, bucket, -1))
     tl.store(last_valid_ptr + req, tl.where(tl.load(num_sampled_ptr + b) > 0, K, 0))
 
 
@@ -281,7 +280,6 @@ class SuffixSplice:
                 )
             else:
                 structured_mask.fill_(True)
-            self.last_valid[input_batch.idx_mapping[structured_mask]] = 0
         _hybrid_observe_kernel[(num_reqs,)](
             input_batch.idx_mapping,
             structured_mask,
@@ -364,6 +362,7 @@ class SuffixSplice:
             self.last_valid[input_batch.idx_mapping] = 0
             return model_drafts
         if k <= self.prefix_len:
+            self.suffix.num_valid[: input_batch.num_reqs].zero_()
             return self._publish(
                 input_batch, model_drafts, model_drafts, num_sampled, k
             )
@@ -374,5 +373,6 @@ class SuffixSplice:
             k - self.prefix_len,
             query_prefix=model_drafts,
             prefix_len=self.prefix_len,
+            skip_rows=self.structured_output_mask,
         )
         return self._publish(input_batch, model_drafts, suffix_drafts, num_sampled, k)

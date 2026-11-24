@@ -112,16 +112,24 @@ Acceptance statistics are indexed by source, match-length bucket, and absolute
 draft position. Model and suffix comparisons use the same candidate bucket when
 one is available. Model maturity is evaluated at the first replaced position.
 Structured-output rows keep their model drafts and do not update these
-statistics; other rows continue to provide feedback. Lookup scans are bounded by
-the current batch's history-length upper bound, not just `max_model_len`.
-Finished-request corpus ingestion uses the scheduler's final trimmed token
-length. Set `suffix_hybrid_min_expected_accepted` to add an expected acceptance
+statistics; they also skip suffix lookup. Other rows continue to provide
+feedback. Lookup scans are bounded by the current batch's history-length upper
+bound, not just `max_model_len`. Rows without newly sampled tokens, empty
+corpora, blocks without a full continuation, and locally maximal matches skip
+avoidable work. Finished-request corpus ingestion uses the scheduler's final
+trimmed token length, carried with the next completion notification. Set
+`suffix_hybrid_min_expected_accepted` to add an expected acceptance
 threshold after the statistics mature. Counts are halved every
 `suffix_hybrid_stats_half_life` feedback steps (default 1024).
 `suffix_hybrid_exploration_interval` is disabled by default. A positive interval
 N inverts the mature routing decision every N steps per batch row, collecting
 fresh comparison samples for both routes. Exploration still requires a valid
 full-length candidate and can override the expected-acceptance threshold.
+`suffix_hybrid_corpus_key_mode` defaults to `dual`. The experimental `four` and
+`four_fallback` settings use an 8-slot 4-token specialization, optionally
+checking the 2-token table only when no valid 4-token candidate exists. They can
+change candidates and recall, so they are intended for ablation rather than a
+default behavior change.
 
 Splice requires greedy drafting and standard verification. It does not support
 adaptive verification, `prefill_context_kv_only`, watermarking, DBO, or

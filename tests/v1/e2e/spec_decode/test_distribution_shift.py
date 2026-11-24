@@ -118,6 +118,89 @@ def test_splice_preserves_sampling_distribution(async_scheduling, vllm_runner):
     )
 
 
+class SpliceSamplingProbe:
+    def read_splice_state(self):
+        splice = self.model_runner.splice
+        if splice is None:
+            return 0, 0
+        corpus_start = splice.suffix_stats.shape[0] // 2
+        return (
+            int(splice.suffix_stats[..., 1].sum().item()),
+            int(splice.suffix_stats[corpus_start:, ..., 1].sum().item()),
+        )
+
+
+@pytest.mark.parametrize("async_scheduling", [False, True], ids=["sync", "async"])
+@single_gpu_only
+def test_splice_real_switch_preserves_sampling_distribution(
+    async_scheduling, vllm_runner
+):
+    splice_config = {
+        "method": "dflash",
+        "model": "z-lab/Qwen3-4B-DFlash-b16",
+        "num_speculative_tokens": 3,
+        "draft_sample_method": "greedy",
+        "rejection_sample_method": "standard",
+        "suffix_hybrid_mode": "splice",
+        "suffix_hybrid_min_match_length": 2,
+        "suffix_decoding_max_tree_depth": 8,
+        "suffix_decoding_corpus_tokens": 65536,
+    }
+    model = "Qwen/Qwen3-4B-FP8" if current_platform.is_cuda() else "Qwen/Qwen3-4B"
+    counts = []
+    for config in (None, splice_config):
+        runner_kwargs = {}
+        if config is not None:
+            runner_kwargs["worker_extension_cls"] = f"{__name__}.SpliceSamplingProbe"
+        with vllm_runner(
+            model,
+            speculative_config=config,
+            async_scheduling=async_scheduling,
+            enforce_eager=True,
+            enable_prefix_caching=False,
+            gpu_memory_utilization=0.8,
+            disable_log_stats=False,
+            max_model_len=256,
+            max_num_seqs=256,
+            **runner_kwargs,
+        ) as runner:
+            num_samples = 2000
+            params = [
+                SamplingParams(
+                    temperature=1.0,
+                    top_k=3,
+                    max_tokens=8,
+                    seed=i,
+                    logprobs=0,
+                )
+                for i in range(num_samples)
+            ]
+            outputs = runner.get_llm().chat(
+                [[{"role": "user", "content": "Name a random European capital."}]]
+                * num_samples,
+                params,
+                use_tqdm=False,
+                chat_template_kwargs={"enable_thinking": False},
+            )
+            first_tokens = []
+            for output in outputs:
+                completion = output.outputs[0]
+                assert completion.token_ids
+                assert completion.logprobs is not None
+                first_tokens.append(completion.token_ids[0])
+                for token_id, logprobs in zip(
+                    completion.token_ids, completion.logprobs, strict=True
+                ):
+                    assert token_id in logprobs
+                    assert math.isfinite(logprobs[token_id].logprob)
+            if config is not None:
+                assert compute_acceptance_rate(runner.get_llm().get_metrics()) > 0
+                _, corpus_observed = runner.llm.collective_rpc("read_splice_state")[0]
+                assert corpus_observed > 0
+            counts.append(Counter(first_tokens))
+    assert_grammar_distribution_unchanged(*counts)
+
+
 def assert_grammar_distribution_unchanged(counts1: Counter[str], counts2: Counter[str]):
     outcomes = sorted(counts1.keys() | counts2.keys())
     row1 = [counts1[outcome] for outcome in outcomes]

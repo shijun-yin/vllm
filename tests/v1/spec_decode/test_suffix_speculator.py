@@ -496,6 +496,20 @@ def test_scan_blocks_follow_history_upper_bound():
     assert spec._num_scan_blocks(batch, 0) == 4
 
 
+def test_scan_blocks_ignore_stale_scratch():
+    spec, req_states = _make(4, 8, 1, 1024, corpus_tokens=1024)
+    _set(req_states, 0, [], [1, 2, 3, 4, 20, 21, 22, 23])
+    _finish(spec, req_states, {"doc": 0})
+    _set(req_states, 0, [], [0] * 696 + [1, 2, 3, 4])
+    spec.scratch[0, 3] = 8 * (spec.max_model_len + 1) + 780
+
+    drafts, num_valid = _propose(spec, req_states, [0])
+
+    assert drafts[0].tolist() == [20, 21, 22, 23]
+    assert num_valid[0] == 4
+    assert spec.sources[0].item() == 1
+
+
 def test_corpus_ingestion_uses_scheduler_trimmed_length():
     spec, req_states = _make(3, 8, 1, 64, corpus_tokens=1024)
     _set(req_states, 0, [1, 2], [7, 8, 9, 10])

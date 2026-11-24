@@ -255,6 +255,7 @@ class Scheduler(SchedulerInterface):
         # requests so that they can free the cached states for those requests.
         # This is flushed at the end of each scheduling step.
         self.finished_req_ids: set[str] = set()
+        self.finished_req_token_lengths: dict[str, int] = {}
 
         # IDs of requests preempted since the last call to schedule().
         self.reset_preempted_req_ids: set[str] = set()
@@ -1755,6 +1756,11 @@ class Scheduler(SchedulerInterface):
                 len(num_scheduled_tokens)
             ]
 
+        finished_req_token_lengths = {
+            req_id: self.finished_req_token_lengths.pop(req_id)
+            for req_id in self.finished_req_ids
+            if req_id in self.finished_req_token_lengths
+        }
         scheduler_output = SchedulerOutput(
             scheduled_new_reqs=new_reqs_data,
             scheduled_cached_reqs=cached_reqs_data,
@@ -1769,6 +1775,7 @@ class Scheduler(SchedulerInterface):
             # It contains the request IDs that are finished in between
             # the previous and the current steps.
             finished_req_ids=self.finished_req_ids,
+            finished_req_token_lengths=finished_req_token_lengths,
             free_encoder_mm_hashes=self.encoder_cache_manager.get_freed_mm_hashes(),
             encoder_input_updates=self._get_encoder_input_updates(
                 num_scheduled_tokens, new_reqs_data, scheduled_encoder_inputs
@@ -2587,9 +2594,7 @@ class Scheduler(SchedulerInterface):
                 final_token_length = request.num_tokens
                 finished = self._handle_stopped_request(request)
                 if finished:
-                    scheduler_output.finished_req_token_lengths[req_id] = (
-                        final_token_length
-                    )
+                    self.finished_req_token_lengths[req_id] = final_token_length
                     kv_transfer_params, ec_transfer_params = self._free_request(request)
                     if (
                         prefill_stats is not None

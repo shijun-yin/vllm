@@ -2182,7 +2182,8 @@ def test_stop_via_update_from_output():
     assert requests[0].request_id in scheduler.finished_req_ids
     assert list(requests[0].output_token_ids) == [10, 42]
     assert list(requests[1].output_token_ids) == [13, 14]
-    assert scheduler_output.finished_req_token_lengths == {
+    next_output = scheduler.schedule()
+    assert next_output.finished_req_token_lengths == {
         requests[0].request_id: requests[0].num_tokens
     }
 
@@ -5361,6 +5362,7 @@ def test_abort_request_when_structured_output_fsm_cannot_advance():
     scheduler.kv_event_publisher = Mock()
     scheduler.finished_req_ids = set()
     scheduler.finished_req_ids_dict = None
+    scheduler.finished_req_token_lengths = {}
     scheduler.aux_output_connector = None
     scheduler.grammar_compile_error_reqs = {}
     scheduler.encoder_cache_mismatch_reqs = set()
