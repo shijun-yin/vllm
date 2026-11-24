@@ -1,0 +1,127 @@
+{
+  "family": "dflash",
+  "mode": "no_spec",
+  "model": "Qwen/Qwen3.8-27B-FP8",
+  "target_revision": "c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
+  "draft_revision": "015e795645c74b1a0eeef3b570031fb62e769bc5",
+  "draft_model": null,
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "top_k": 20,
+  "ignore_eos": false,
+  "max_tokens": 128,
+  "prefix_len": 1,
+  "corpus_tokens": 65536,
+  "batch_size": 4,
+  "max_model_len": 3072,
+  "gpu_memory_utilization": 0.9,
+  "num_speculative_tokens": 0,
+  "results": {
+    "blazedit": {
+      "ids": [
+        "blazedit-2",
+        "blazedit-7",
+        "blazedit-8",
+        "blazedit-11"
+      ],
+      "prompt_tokens": [
+        1471,
+        1163,
+        1263,
+        1845
+      ],
+      "waves": [
+        {
+          "wave": "cold",
+          "seconds": 5.78529411800082,
+          "output_tokens": 512,
+          "output_tokens_per_second": 88.50025418879272,
+          "token_counts": [
+            128,
+            128,
+            128,
+            128
+          ],
+          "finish_reasons": {
+            "length": 4
+          },
+          "spec_metrics": {},
+          "accepted_per_draft": null,
+          "draft_token_acceptance": null
+        },
+        {
+          "wave": "hot-1",
+          "seconds": 5.7805942359991604,
+          "output_tokens": 512,
+          "output_tokens_per_second": 88.57220885899149,
+          "token_counts": [
+            128,
+            128,
+            128,
+            128
+          ],
+          "finish_reasons": {
+            "length": 4
+          },
+          "spec_metrics": {},
+          "accepted_per_draft": null,
+          "draft_token_acceptance": null
+        }
+      ],
+      "hybrid_stats": null
+    },
+    "speed_coding": {
+      "ids": [
+        "ecf92ab7acf1492da70e68fcddd9d0b7",
+        "5ace1d46a306452da3c517a7a8bc2093",
+        "709706096071415b9f3bd1d558693d1f",
+        "182e7a241cd64f309a013f89f2dde604"
+      ],
+      "prompt_tokens": [
+        417,
+        40,
+        122,
+        183
+      ],
+      "waves": [
+        {
+          "wave": "cold",
+          "seconds": 4.975748184999247,
+          "output_tokens": 512,
+          "output_tokens_per_second": 102.89909797757932,
+          "token_counts": [
+            128,
+            128,
+            128,
+            128
+          ],
+          "finish_reasons": {
+            "length": 4
+          },
+          "spec_metrics": {},
+          "accepted_per_draft": null,
+          "draft_token_acceptance": null
+        },
+        {
+          "wave": "hot-1",
+          "seconds": 4.763888862000385,
+          "output_tokens": 512,
+          "output_tokens_per_second": 107.4752192655074,
+          "token_counts": [
+            128,
+            128,
+            128,
+            128
+          ],
+          "finish_reasons": {
+            "length": 4
+          },
+          "spec_metrics": {},
+          "accepted_per_draft": null,
+          "draft_token_acceptance": null
+        }
+      ],
+      "hybrid_stats": null
+    }
+  }
+}

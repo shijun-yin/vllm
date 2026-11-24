@@ -1,0 +1,153 @@
+{
+  "family": "dflash",
+  "mode": "splice",
+  "model": "Qwen/Qwen3.8-27B-FP8",
+  "target_revision": "c3a462cc3d38cf351f3b26cbd763469eeb74ef81",
+  "draft_revision": "015e795645c74b1a0eeef3b570031fb62e769bc5",
+  "draft_model": "incoai/Qwen3.8-27B-DFlash2",
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "top_k": 20,
+  "ignore_eos": false,
+  "max_tokens": 128,
+  "prefix_len": 1,
+  "corpus_tokens": 65536,
+  "batch_size": 4,
+  "max_model_len": 3072,
+  "gpu_memory_utilization": 0.9,
+  "num_speculative_tokens": 7,
+  "results": {
+    "blazedit": {
+      "ids": [
+        "blazedit-2",
+        "blazedit-7",
+        "blazedit-8",
+        "blazedit-11"
+      ],
+      "prompt_tokens": [
+        1471,
+        1163,
+        1263,
+        1845
+      ],
+      "waves": [
+        {
+          "wave": "cold",
+          "seconds": 3.130521237000039,
+          "output_tokens": 512,
+          "output_tokens_per_second": 163.55103870518596,
+          "token_counts": [
+            128,
+            128,
+            128,
+            128
+          ],
+          "finish_reasons": {
+            "length": 4
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 454,
+            "vllm:spec_decode_num_draft_tokens": 532,
+            "vllm:spec_decode_num_drafts": 76
+          },
+          "accepted_per_draft": 5.973684210526316,
+          "draft_token_acceptance": 0.8533834586466166
+        },
+        {
+          "wave": "hot-1",
+          "seconds": 2.1840271969999776,
+          "output_tokens": 512,
+          "output_tokens_per_second": 234.42931512175912,
+          "token_counts": [
+            128,
+            128,
+            128,
+            128
+          ],
+          "finish_reasons": {
+            "length": 4
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 448,
+            "vllm:spec_decode_num_draft_tokens": 518,
+            "vllm:spec_decode_num_drafts": 74
+          },
+          "accepted_per_draft": 6.054054054054054,
+          "draft_token_acceptance": 0.8648648648648649
+        }
+      ],
+      "hybrid_stats": {
+        "model_accepted": 632,
+        "model_observed": 634,
+        "suffix_accepted": 91,
+        "suffix_observed": 107
+      }
+    },
+    "speed_coding": {
+      "ids": [
+        "ecf92ab7acf1492da70e68fcddd9d0b7",
+        "5ace1d46a306452da3c517a7a8bc2093",
+        "709706096071415b9f3bd1d558693d1f",
+        "182e7a241cd64f309a013f89f2dde604"
+      ],
+      "prompt_tokens": [
+        417,
+        40,
+        122,
+        183
+      ],
+      "waves": [
+        {
+          "wave": "cold",
+          "seconds": 2.20192173800001,
+          "output_tokens": 512,
+          "output_tokens_per_second": 232.52415885818266,
+          "token_counts": [
+            128,
+            128,
+            128,
+            128
+          ],
+          "finish_reasons": {
+            "length": 4
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 445,
+            "vllm:spec_decode_num_draft_tokens": 525,
+            "vllm:spec_decode_num_drafts": 75
+          },
+          "accepted_per_draft": 5.933333333333334,
+          "draft_token_acceptance": 0.8476190476190476
+        },
+        {
+          "wave": "hot-1",
+          "seconds": 1.1920736060000081,
+          "output_tokens": 512,
+          "output_tokens_per_second": 429.50367949007045,
+          "token_counts": [
+            128,
+            128,
+            128,
+            128
+          ],
+          "finish_reasons": {
+            "length": 4
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 448,
+            "vllm:spec_decode_num_draft_tokens": 539,
+            "vllm:spec_decode_num_drafts": 77
+          },
+          "accepted_per_draft": 5.818181818181818,
+          "draft_token_acceptance": 0.8311688311688312
+        }
+      ],
+      "hybrid_stats": {
+        "model_accepted": 675,
+        "model_observed": 675,
+        "suffix_accepted": 38,
+        "suffix_observed": 52
+      }
+    }
+  }
+}

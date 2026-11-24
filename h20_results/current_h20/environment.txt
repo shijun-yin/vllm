@@ -1,0 +1,26 @@
+Tue Nov 24 01:13:17 AM CST 2026
+NVIDIA H20, 97871 MiB, 580.126.09
+bf151b7 [Bugfix][Multimodal] Convert PIL video frames to RGB like PIL images (#69089)
+ M .buildkite/test_areas/spec_decode.yaml
+ M docs/features/speculative_decoding/README.md
+ M tests/test_config.py
+ M tests/v1/core/test_scheduler.py
+ M tests/v1/e2e/spec_decode/ngram_suffix/test_ngram_suffix.py
+ M tests/v1/e2e/spec_decode/test_distribution_shift.py
+ M tests/v1/spec_decode/test_suffix_speculator.py
+ M tests/v1/spec_decode/utils.py
+ M vllm/config/speculative.py
+ M vllm/config/vllm.py
+ M vllm/v1/core/sched/output.py
+ M vllm/v1/core/sched/scheduler.py
+ M vllm/v1/worker/gpu/input_batch.py
+ M vllm/v1/worker/gpu/model_runner.py
+ M vllm/v1/worker/gpu/spec_decode/__init__.py
+ M vllm/v1/worker/gpu/spec_decode/suffix/config.py
+ M vllm/v1/worker/gpu/spec_decode/suffix/speculator.py
+ M vllm/v1/worker/gpu/warmup.py
+?? tests/v1/spec_decode/test_hybrid_speculator.py
+?? vllm/v1/worker/gpu/spec_decode/hybrid/
+95f4eaa12371794f0ab96f4f50aef013fe8168afec58db4537e7a46528833fcf  /root/qwen35-9b-deploy/h20_validation/suffix_splice.patch
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/nvme1n1p3  492G   71G  402G  15% /mnt/h20disk

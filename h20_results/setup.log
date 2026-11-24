@@ -1,0 +1,672 @@
+HEAD is now at bf151b7 [Bugfix][Multimodal] Convert PIL video frames to RGB like PIL images (#69089)
+M	.buildkite/test_areas/spec_decode.yaml
+M	docs/features/speculative_decoding/README.md
+M	tests/test_config.py
+M	tests/v1/e2e/spec_decode/ngram_suffix/test_ngram_suffix.py
+M	tests/v1/spec_decode/utils.py
+M	vllm/config/speculative.py
+M	vllm/config/vllm.py
+M	vllm/v1/worker/gpu/model_runner.py
+M	vllm/v1/worker/gpu/spec_decode/__init__.py
+M	vllm/v1/worker/gpu/spec_decode/suffix/config.py
+M	vllm/v1/worker/gpu/spec_decode/suffix/speculator.py
+error: patch failed: .buildkite/test_areas/spec_decode.yaml:320
+error: .buildkite/test_areas/spec_decode.yaml: patch does not apply
+error: patch failed: docs/features/speculative_decoding/README.md:16
+error: docs/features/speculative_decoding/README.md: patch does not apply
+error: patch failed: tests/test_config.py:1328
+error: tests/test_config.py: patch does not apply
+error: patch failed: tests/v1/e2e/spec_decode/ngram_suffix/test_ngram_suffix.py:5
+error: tests/v1/e2e/spec_decode/ngram_suffix/test_ngram_suffix.py: patch does not apply
+error: tests/v1/spec_decode/test_hybrid_speculator.py: already exists in working directory
+error: patch failed: tests/v1/spec_decode/utils.py:28
+error: tests/v1/spec_decode/utils.py: patch does not apply
+error: patch failed: vllm/config/speculative.py:612
+error: vllm/config/speculative.py: patch does not apply
+error: patch failed: vllm/config/vllm.py:1439
+error: vllm/config/vllm.py: patch does not apply
+error: patch failed: vllm/v1/worker/gpu/model_runner.py:291
+error: vllm/v1/worker/gpu/model_runner.py: patch does not apply
+error: patch failed: vllm/v1/worker/gpu/spec_decode/__init__.py:25
+error: vllm/v1/worker/gpu/spec_decode/__init__.py: patch does not apply
+error: vllm/v1/worker/gpu/spec_decode/hybrid/__init__.py: already exists in working directory
+error: vllm/v1/worker/gpu/spec_decode/hybrid/speculator.py: already exists in working directory
+error: patch failed: vllm/v1/worker/gpu/spec_decode/suffix/config.py:11
+error: vllm/v1/worker/gpu/spec_decode/suffix/config.py: patch does not apply
+error: patch failed: vllm/v1/worker/gpu/spec_decode/suffix/speculator.py:79
+error: vllm/v1/worker/gpu/spec_decode/suffix/speculator.py: patch does not apply
+Using Python 3.12.3 environment at: /root/qwen35-9b-deploy/.venv-h20
+Resolved 199 packages in 3m 14s
+   Building vllm @ file:///root/qwen35-9b-deploy/vllm-h20
+Downloading z3-solver (27.9MiB)
+Downloading nvidia-cudnn-frontend (11.1MiB)
+Downloading flashinfer-python (96.6MiB)
+Downloading pillow (6.8MiB)
+Downloading pycountry (7.7MiB)
+Downloading nvidia-nvvm (61.3MiB)
+Downloading apache-tvm-ffi (2.6MiB)
+Downloading nvidia-cuda-nvcc (42.0MiB)
+Downloading tokenspeed-triton (90.5MiB)
+Downloading cuda-core (6.3MiB)
+Downloading outlines-core (2.2MiB)
+Downloading pydantic-core (2.2MiB)
+Downloading instanttensor (7.0MiB)
+Downloading nvidia-cutlass-dsl-libs-base (2.9MiB)
+Downloading nvidia-cutlass-dsl-libs-cu12 (87.5MiB)
+Downloading xgrammar (1.3MiB)
+Downloading torchcodec (9.7MiB)
+ Downloaded xgrammar
+Downloading openai (2.3MiB)
+Downloading transformers (12.7MiB)
+Downloading nvidia-cuda-cccl (3.4MiB)
+Downloading tilelang (48.2MiB)
+Downloading numba (3.6MiB)
+Downloading oss-harmony (3.4MiB)
+Downloading torchvision (7.2MiB)
+Downloading fastsafetensors (2.6MiB)
+Downloading tiktoken (1.1MiB)
+Downloading uvloop (4.3MiB)
+Downloading pygments (1.2MiB)
+Downloading opencv-python-headless (60.8MiB)
+Downloading torchaudio (1.7MiB)
+ Downloaded openai
+Downloading hf-xet (4.1MiB)
+Downloading llvmlite (53.7MiB)
+Downloading mistral-common (6.3MiB)
+Downloading cryptography (4.5MiB)
+Downloading nccl-extensions (24.0MiB)
+Downloading nvidia-cutlass-dsl-libs-cu13 (87.7MiB)
+Downloading grpcio (7.0MiB)
+Downloading aiohttp (1.8MiB)
+Downloading sentencepiece (1.6MiB)
+ Downloaded outlines-core
+ Downloaded nvidia-cudnn-frontend
+Downloading tokenizers (3.2MiB)
+Downloading nvidia-cutlass-dsl-libs-core (1.6MiB)
+Downloading pynvvideocodec (25.6MiB)
+Downloading anthropic (2.4MiB)
+Downloading numpy (15.8MiB)
+Downloading nccl4py (3.5MiB)
+Downloading llguidance (2.9MiB)
+ Downloaded pydantic-core
+ Downloaded mistral-common
+ Downloaded uvloop
+ Downloaded llguidance
+ Downloaded tiktoken
+ Downloaded torchcodec
+ Downloaded pygments
+ Downloaded nccl4py
+ Downloaded aiohttp
+ Downloaded sentencepiece
+ Downloaded nvidia-cuda-cccl
+ Downloaded nvidia-cutlass-dsl-libs-core
+ Downloaded z3-solver
+ Downloaded apache-tvm-ffi
+ Downloaded fastsafetensors
+ Downloaded torchaudio
+ Downloaded nvidia-cutlass-dsl-libs-base
+ Downloaded anthropic
+ Downloaded oss-harmony
+ Downloaded numba
+ Downloaded tokenizers
+ Downloaded hf-xet
+ Downloaded cryptography
+ Downloaded cuda-core
+ Downloaded grpcio
+ Downloaded pillow
+ Downloaded instanttensor
+ Downloaded pycountry
+ Downloaded transformers
+ Downloaded numpy
+ Downloaded nccl-extensions
+ Downloaded pynvvideocodec
+ Downloaded tilelang
+ Downloaded llvmlite
+ Downloaded nvidia-cutlass-dsl-libs-cu13
+ Downloaded nvidia-cuda-nvcc
+ Downloaded opencv-python-headless
+ Downloaded nvidia-nvvm
+ Downloaded nvidia-cutlass-dsl-libs-cu12
+ Downloaded tokenspeed-triton
+ Downloaded flashinfer-python
+ Downloaded torchvision
+      Built vllm @ file:///root/qwen35-9b-deploy/vllm-h20
+Prepared 169 packages in 6m 53s
+Installed 198 packages in 184ms
+Prepared 1 package without build isolation in 0.07ms
+Installed 1 package in 110ms
+ + agent-detector==2.0.0
+ + aiohappyeyeballs==2.7.1
+ + aiohttp==3.14.5
+ + aiosignal==1.4.0
+ + annotated-doc==0.0.7
+ + annotated-types==0.8.0
+ + anthropic==2.12.0
+ + anyio==4.16.0
+ + apache-tvm-ffi==0.1.11
+ + astor==0.8.1
+ + attrs==26.1.0
+ + blake3==1.0.11
+ + cachetools==8.0.2
+ + cbor2==6.3.0
+ + certifi==2026.11.20
+ + cffi==2.1.1
+ + charset-normalizer==3.5.2
+ + click==8.5.1
+ + cloudpickle==3.1.3
+ + compressed-tensors==0.20.1
+ + cryptography==50.0.2
+ + cuda-bindings==13.5.0
+ + cuda-core==1.2.2
+ + cuda-pathfinder==1.9.1
+ + cuda-python==13.5.0
+ + cuda-tile==1.8.1
+ + cuda-toolkit==13.2.1
+ + depyf==0.20.0
+ + detect-installer==0.2.1
+ + dill==0.4.1
+ + dnspython==2.9.2
+ + docstring-parser==0.18.0
+ + einops==0.8.2
+ + email-validator==2.4.0
+ + fastapi==0.136.3
+ + fastapi-cli==0.0.34
+ + fastapi-cloud-cli==0.28.0
+ + fastar==0.12.0
+ + fastsafetensors==0.5.0
+ + filelock==4.3.0
+ + flashinfer-python==0.7.4
+ + frozenlist==1.8.0
+ + fsspec==2026.9.0
+ + googleapis-common-protos==1.76.0
+ + grpcio==1.85.3
+ + h11==0.16.0
+ + hf-xet==1.8.0
+ + httpcore==1.0.9
+ + httpcore2==2.16.2
+ + httptools==0.9.0
+ + httpx==0.28.1
+ + httpx2==2.16.2
+ + huggingface-hub==2.4.0
+ + humming-kernels==0.1.20
+ + idna==3.20
+ + ijson==3.6.0
+ + instanttensor==0.2.3
+ + interegular==0.3.3
+ + jinja2==3.1.6
+ + jiter==0.19.0
+ + jmespath==1.1.0
+ + jsonschema==4.26.0
+ + jsonschema-specifications==2025.9.1
+ + lark==1.2.2
+ + llguidance==1.7.6
+ + llvmlite==0.47.0
+ + lm-format-enforcer==0.11.3
+ + loguru==0.8.0
+ + markdown-it-py==4.3.0
+ + markupsafe==3.0.4
+ + mcp==2.3.0
+ + mcp-types==2.3.0
+ + mdurl==0.1.2
+ + mistral-common==1.13.1
+ + ml-dtypes==0.7.0
+ + model-hosting-container-standards==0.1.16
+ + mpmath==1.3.0
+ + msgspec==0.22.0
+ + multidict==7.2.1
+ + nccl-extensions==0.2.0
+ + nccl4py==0.6.0
+ + networkx==3.7
+ + ninja==1.13.2
+ + numba==0.65.0
+ + numpy==2.3.5
+ + nvidia-cublas==13.4.0.1
+ + nvidia-cuda-cccl==13.2.75
+ + nvidia-cuda-crt==13.2.78
+ + nvidia-cuda-cupti==13.2.75
+ + nvidia-cuda-nvcc==13.2.78
+ + nvidia-cuda-nvrtc==13.2.78
+ + nvidia-cuda-runtime==13.2.75
+ + nvidia-cudnn-cu13==9.24.0.43
+ + nvidia-cudnn-frontend==1.32.3
+ + nvidia-cufft==12.2.0.46
+ + nvidia-cufile==1.17.1.22
+ + nvidia-curand==10.4.2.55
+ + nvidia-cusolver==12.2.0.1
+ + nvidia-cusparse==12.7.10.1
+ + nvidia-cusparselt-cu13==0.8.1
+ + nvidia-cutlass-dsl==4.8.0
+ + nvidia-cutlass-dsl-libs-base==4.8.0
+ + nvidia-cutlass-dsl-libs-core==4.8.0
+ + nvidia-cutlass-dsl-libs-cu12==4.8.0
+ + nvidia-cutlass-dsl-libs-cu13==4.8.0
+ + nvidia-ml-py==13.615.71
+ + nvidia-nccl-cu13==2.30.7
+ + nvidia-nvjitlink==13.5.37
+ + nvidia-nvshmem-cu13==3.4.5
+ + nvidia-nvtx==13.2.75
+ + nvidia-nvvm==13.2.78
+ + nvtx==0.2.15
+ + openai==3.57.0
+ + opencv-python-headless==5.1.0.95
+ + opentelemetry-api==1.45.2
+ + opentelemetry-exporter-http-transport==0.66b2
+ + opentelemetry-exporter-otlp==1.45.2
+ + opentelemetry-exporter-otlp-common==0.66b2
+ + opentelemetry-exporter-otlp-proto-common==1.45.2
+ + opentelemetry-exporter-otlp-proto-grpc==1.45.2
+ + opentelemetry-exporter-otlp-proto-http==1.45.2
+ + opentelemetry-proto==1.45.2
+ + opentelemetry-sdk==1.45.2
+ + opentelemetry-semantic-conventions==0.66b2
+ + opentelemetry-semantic-conventions-ai==0.5.1
+ + orjson==3.13.0
+ + oss-harmony==0.0.12
+ + outlines-core==0.2.14
+ + packaging==26.3
+ + partial-json-parser==0.2.1.1.post7
+ + pillow==13.0.0
+ + prometheus-client==0.26.0
+ + prometheus-fastapi-instrumentator==8.1.0
+ + propcache==0.5.4
+ + protobuf==7.36.2
+ + psutil==7.2.2
+ + py-cpuinfo==9.0.0
+ + pybase64==1.5.2
+ + pycountry==26.2.16
+ + pycparser==3.12
+ + pydantic==2.14.4
+ + pydantic-core==2.50.5
+ + pydantic-extra-types==2.11.1
+ + pydantic-settings==2.16.3
+ + pygments==2.21.0
+ + pyjwt==2.15.1
+ + pynvvideocodec==2.2.4
+ + python-dotenv==1.2.4
+ + python-json-logger==4.2.0
+ + python-multipart==0.0.34
+ + pyyaml==6.0.4
+ + pyzmq==27.3.0
+ + quack-kernels==0.6.5
+ + referencing==0.37.0
+ + regex==2026.11.19
+ + requests==2.34.2
+ + rich==15.0.0
+ + rich-toolkit==0.20.6
+ + rignore==0.8.1
+ + rpds-py==2026.9.1
+ + safetensors==0.8.0
+ + sentencepiece==0.2.3
+ + sentry-sdk==2.75.0
+ + setproctitle==1.3.8
+ + setuptools==80.10.2
+ + shellingham==1.5.4
+ + six==1.17.0
+ + sniffio==1.3.1
+ + sse-starlette==3.7.0
+ + starlette==1.10.0
+ + supervisor==4.3.0
+ + sympy==1.14.0
+ + tabulate==0.10.0
+ + tiktoken==0.14.0
+ + tilelang==0.1.12
+ + tokenizers==0.23.3
+ + tokenspeed-mla==2.0.3
+ + tokenspeed-triton==3.9.10.post20261028
+ + torch==2.14.0+cu132
+ + torch-c-dlpack-ext==0.1.5
+ + torchaudio==2.11.1+cu132
+ + torchcodec==0.17.0+cu132
+ + torchvision==0.29.2+cu132
+ + tqdm==4.70.1
+ + transformers==5.23.0
+ + triton==3.8.0
+ + truststore==0.10.5
+ + typer==0.29.2
+ + typing-extensions==4.16.0
+ + typing-inspection==0.4.5
+ + urllib3==2.8.0
+ + uvicorn==0.54.0
+ + uvloop==0.23.0
+ + vllm==0.1.dev1+gbf151b7eb.d20261122.precompiled (from file:///root/qwen35-9b-deploy/vllm-h20)
+ + watchfiles==1.3.0
+ + websockets==17.4
+ + xgrammar==0.2.9
+ + yarl==1.25.1
+ + z3-solver==4.15.4.0
+Using Python 3.12.3 environment at: /root/qwen35-9b-deploy/.venv-h20
+Resolved 376 packages in 8.55s
+   Building sqlitedict==2.1.0
+Downloading lxml (5.0MiB)
+Downloading decord (13.0MiB)
+Downloading fastparquet (1.9MiB)
+Downloading statsmodels (11.5MiB)
+Downloading datamodel-code-generator (2.4MiB)
+Downloading runai-model-streamer-azure (4.8MiB)
+Downloading pandas (11.5MiB)
+Downloading pywavelets (4.3MiB)
+Downloading jsonschema-rs (6.1MiB)
+      Built sqlitedict==2.1.0
+Downloading timm (2.7MiB)
+Downloading genai-perf (3.0MiB)
+Downloading grpcio (6.4MiB)
+Downloading perf-analyzer (9.3MiB)
+Downloading plotly (9.2MiB)
+Downloading virtualenv (5.5MiB)
+Downloading pyarrow (52.5MiB)
+ Downloaded fastparquet
+Downloading open-clip-torch (1.5MiB)
+Downloading cramjam (1.9MiB)
+Downloading sqlalchemy (4.5MiB)
+Downloading schemathesis (1.2MiB)
+Downloading python-rapidjson (1.7MiB)
+   Building docopt==0.6.2
+Downloading matplotlib (9.4MiB)
+      Built docopt==0.6.2
+Downloading lm-eval (8.7MiB)
+   Building word2number==1.1
+Downloading runai-model-streamer-s3 (5.5MiB)
+Downloading botocore (16.1MiB)
+Downloading cohere-melody (2.4MiB)
+ Downloaded open-clip-torch
+      Built word2number==1.1
+Downloading mteb (6.7MiB)
+Downloading soundfile (1.3MiB)
+Downloading rapidfuzz (3.0MiB)
+Downloading hypothesis (1.1MiB)
+Downloading av (33.4MiB)
+   Building rouge-score==0.1.2
+      Built rouge-score==0.1.2
+Downloading ml-dtypes (4.8MiB)
+Downloading pycryptodomex (2.2MiB)
+Downloading black (2.0MiB)
+Downloading fonttools (5.2MiB)
+Downloading nltk (1.6MiB)
+ Downloaded jsonschema-rs
+ Downloaded lxml
+Downloading scikit-learn (8.7MiB)
+Downloading scipy (33.7MiB)
+ Downloaded black
+Downloading ray (70.8MiB)
+   Building encodec==0.1.1
+   Building transformers-stream-generator==0.0.5
+      Built encodec==0.1.1
+ Downloaded hypothesis
+Downloading py-spy (2.8MiB)
+      Built transformers-stream-generator==0.0.5
+Downloading polars-runtime-32 (51.4MiB)
+Downloading fastavro (3.5MiB)
+Downloading stringzilla (4.0MiB)
+ Downloaded decord
+Downloading runai-model-streamer-gcs (9.6MiB)
+Downloading kiwisolver (1.4MiB)
+ Downloaded pywavelets
+ Downloaded runai-model-streamer-azure
+ Downloaded datamodel-code-generator
+ Downloaded matplotlib
+ Downloaded soundfile
+ Downloaded schemathesis
+ Downloaded grpcio
+ Downloaded statsmodels
+ Downloaded lm-eval
+ Downloaded cohere-melody
+ Downloaded scikit-learn
+ Downloaded python-rapidjson
+ Downloaded cramjam
+ Downloaded nltk
+ Downloaded kiwisolver
+ Downloaded scipy
+ Downloaded ml-dtypes
+ Downloaded pycryptodomex
+ Downloaded runai-model-streamer-s3
+ Downloaded timm
+ Downloaded py-spy
+ Downloaded runai-model-streamer-gcs
+ Downloaded genai-perf
+ Downloaded rapidfuzz
+ Downloaded stringzilla
+ Downloaded mteb
+ Downloaded sqlalchemy
+ Downloaded botocore
+ Downloaded perf-analyzer
+ Downloaded fastavro
+ Downloaded virtualenv
+ Downloaded av
+ Downloaded plotly
+ Downloaded ray
+ Downloaded pandas
+ Downloaded fonttools
+ Downloaded pyarrow
+ Downloaded polars-runtime-32
+Prepared 207 packages in 38.92s
+Uninstalled 3 packages in 1ms
+Installed 207 packages in 204ms
+ + abi3info==2026.9.25
+ + absl-py==2.5.1
+ + accelerate==1.16.0
+ + aiohttp-cors==0.8.1
+ + albucore==0.0.24
+ + albumentations==2.0.8
+ + alembic==1.20.1
+ + argcomplete==3.8.0
+ + av==19.0.2
+ + azure-core==1.41.0
+ + azure-identity==1.27.0
+ + azure-storage-blob==12.31.1
+ + backoff==2.2.1
+ + black==26.10.1
+ + blobfile==3.3.0
+ + bm25s==0.3.16
+ + boto3==1.44.9
+ + botocore==1.44.9
+ + bounded-pool-executor==0.0.3
+ + buildkite-test-collector==0.1.9
+ + chardet==6.0.0.post1
+ + choreographer==1.4.0
+ + chz==0.4.0
+ + cohere==7.3.2
+ + cohere-melody==0.15.3
+ + colorama==0.4.6
+ + colorful==0.5.8
+ + colorlog==6.12.0
+ + contourpy==1.4.0
+ + coverage==7.17.4
+ + cramjam==2.14.0
+ + cycler==0.12.1
+ + datamodel-code-generator==0.100.0
+ + dataproperty==1.1.1
+ + datasets==5.2.0
+ + decorator==5.3.2
+ + decord==0.6.0
+ + defusedxml==0.7.1
+ + distlib==0.4.4
+ + docker==7.2.0
+ + docopt==0.6.2
+ + einx==0.4.3
+ + encodec==0.1.1
+ + et-xmlfile==2.0.0
+ + evaluate==0.4.6
+ + fastavro==1.13.1
+ + fastparquet==2026.9.0
+ + fonttools==4.68.0
+ + formulaic==1.2.2
+ + frozendict==2.5.1
+ + ftfy==6.3.1
+ + genai-perf==0.0.16
+ + genson==1.4.0
+ + google-api-core==2.44.0
+ + google-auth==2.63.1
+ + google-cloud-core==2.8.0
+ + google-cloud-storage==3.17.1
+ + google-crc32c==1.9.0
+ + google-resumable-media==2.11.0
+ + gpt-oss==0.0.9
+ + graphql-core==3.2.14
+ - grpcio==1.85.3
+ + grpcio==1.78.0
+ + grpcio-reflection==1.78.0
+ + h2==4.4.1
+ + harfile==0.7.0
+ + hiredis==3.5.0
+ + hpack==4.2.0
+ + html2text==2025.4.15
+ + humanize==4.17.0
+ + hyperframe==6.1.0
+ + hypothesis==6.170.17
+ + hypothesis-graphql==0.13.7
+ + imagehash==4.3.2
+ + inflect==7.6.0
+ + iniconfig==2.3.1
+ + interface-meta==2.0.1
+ + isodate==0.7.2
+ + isort==8.0.1
+ + jaraco-functools==4.6.0
+ + jiwer==4.0.0
+ + joblib==1.6.0
+ + jsonschema-rs==0.61.2
+ + jupyter-client==8.10.0
+ + jupyter-core==5.9.1
+ + kaldi-native-fbank==1.23.3
+ + kaleido==1.5.2
+ + kiwisolver==1.5.1
+ + lazy-loader==0.6
+ + libnacl==2.1.0
+ + librosa==1.0.1
+ + lm-eval==0.4.13
+ + logistro==2.0.1
+ + lxml==6.1.3
+ + mako==1.4.3
+ + matplotlib==3.11.2
+ + mbstrdecoder==1.1.5
+ - ml-dtypes==0.7.0
+ + ml-dtypes==0.5.4
+ + more-itertools==11.2.1
+ + msal==1.39.0
+ + msal-extensions==1.3.1
+ + msgpack==1.2.4
+ + mteb==2.27.20
+ + multiprocess==0.70.19
+ + mypy-extensions==1.2.0
+ + narwhals==2.29.0
+ + nltk==3.10.4
+ + num2words==0.5.14
+ + open-clip-torch==2.32.0
+ + opencensus==0.11.4
+ + opencensus-context==0.1.3
+ + openpyxl==3.1.5
+ + opentelemetry-exporter-prometheus==0.66b2
+ + optuna==3.6.1
+ + pandas==3.1.1
+ + pathspec==1.1.1
+ + pathvalidate==3.3.1
+ + patsy==1.0.3
+ + peft==0.22.0
+ + perceptron==0.2.0
+ + perf-analyzer==2.61.0
+ + platformdirs==4.14.8
+ + plotly==7.1.0
+ + pluggy==1.7.0
+ + polars==2.1.0
+ + polars-runtime-32==2.1.0
+ + pooch==1.9.0
+ + portalocker==4.4.2
+ + pqdm==0.2.0
+ + proto-plus==1.29.0
+ - protobuf==7.36.2
+ + protobuf==6.33.6
+ + py-spy==0.4.4
+ + pyarrow==26.0.1
+ + pyasn1==0.6.5
+ + pyasn1-modules==0.4.2
+ + pycryptodomex==3.24.2
+ + pycxxfilt==1.2.0
+ + pyparsing==3.3.3
+ + pyrate-limiter==4.5.1
+ + pystemmer==3.1.0
+ + pytablewriter==1.2.1
+ + pytest==9.2.0
+ + pytest-asyncio==1.5.0
+ + pytest-cov==7.1.0
+ + pytest-forked==1.7.5
+ + pytest-mock==3.17.0
+ + pytest-rerunfailures==16.7
+ + pytest-shard==0.1.2
+ + pytest-timeout==2.4.0
+ + python-dateutil==2.9.0.post0
+ + python-discovery==1.9.6
+ + python-rapidjson==1.26
+ + pytokens==0.4.1
+ + pytrec-eval-terrier==0.5.11
+ + pytz==2026.6
+ + pywavelets==1.10.0
+ + rapidfuzz==3.14.6
+ + ray==2.56.1
+ + redis==8.1.0
+ + responses==0.26.3
+ + rouge-score==0.1.2
+ + runai-model-streamer==0.17.1
+ + runai-model-streamer-azure==0.17.1
+ + runai-model-streamer-gcs==0.17.1
+ + runai-model-streamer-s3==0.17.1
+ + s3transfer==0.19.3
+ + sacrebleu==2.6.0
+ + schemathesis==4.33.4
+ + scikit-learn==1.9.1
+ + scipy==1.18.1
+ + segmentation-models-pytorch==0.6.0
+ + sentence-transformers==6.3.0
+ + simplejson==4.3.0
+ + simsimd==6.5.16
+ + smart-open==10.0.0
+ + sortedcontainers==2.4.0
+ + soundfile==0.14.0
+ + soxr==1.1.0
+ + sqlalchemy==2.1.9
+ + sqlitedict==2.1.0
+ + statsmodels==0.15.0
+ + stringzilla==5.3.2
+ + structlog==26.1.0
+ + tabledata==1.3.5
+ + tblib==3.2.2
+ + tcolorpy==0.1.7
+ + tenacity==9.2.1
+ + tensorizer==2.12.1
+ + termcolor==3.3.0
+ + threadpoolctl==3.8.0
+ + timm==1.0.31
+ + torch-abi-audit==0.4.0
+ + torch-einops-utils==0.2.8
+ + tornado==6.6.1
+ + traitlets==5.16.1
+ + transformers-stream-generator==0.0.5
+ + tritonclient==2.75.0
+ + typeguard==4.6.1
+ + typepy==1.3.5
+ + types-requests==2.33.0.20261030
+ + vector-quantize-pytorch==1.34.1
+ + virtualenv==21.15.12
+ + vocos==0.1.0
+ + wcwidth==0.9.5
+ + werkzeug==3.1.9
+ + word2number==1.1
+ + wrapt==2.5.2
+ + xxhash==4.1.0
+Downloading blazedit at c00060332eb3f60ae7b2cd448caa45a83f25f1c3
+You have used a large amount of egress over the last 30 days. To protect our platform health, once you reach your account's max quota, your downloads will be throttled or blocked. If you regularly need more, you may consider upgrading your current user or organization plan to benefit from higher allowances.
+OK /root/qwen35-9b-deploy/data/blazedit_5k/data/train-00000-of-00001-cd50d93ebdf7cd84.parquet 8c284ea22229530d3c1cbcca5448c024adce742d967ddc4ec6727f31fe576154
+Downloading speed_bench at fa4e669bee2a4393c56aa8ed05a7c667897f9590
+OK /root/qwen35-9b-deploy/data/speed_bench/qualitative/test-00000-of-00001.parquet bb5ddc59123d0d3aebfb5bd70654dd6b56dde00a44b27153f408616073d08afb
+Downloading spec_bench at fd2c1cd7d2201ef71db4c5f4e455008f017967bf
+OK /root/qwen35-9b-deploy/data/spec_bench/question.jsonl 4b6d33e79484f9841c487ee87d1cf6aa8c6066f61d5d482ff09e5a007fafdf04
+OK /root/qwen35-9b-deploy/data/blazedit_5k/data/train-00000-of-00001-cd50d93ebdf7cd84.parquet 8c284ea22229530d3c1cbcca5448c024adce742d967ddc4ec6727f31fe576154
+OK /root/qwen35-9b-deploy/data/speed_bench/qualitative/test-00000-of-00001.parquet bb5ddc59123d0d3aebfb5bd70654dd6b56dde00a44b27153f408616073d08afb
+OK /root/qwen35-9b-deploy/data/spec_bench/question.jsonl 4b6d33e79484f9841c487ee87d1cf6aa8c6066f61d5d482ff09e5a007fafdf04
+Fetching 81 files:   0%|          | 0/81 [00:00<?, ?it/s]You have used a large amount of egress over the last 30 days. To protect our platform health, once you reach your account's max quota, your downloads will be throttled or blocked. If you regularly need more, you may consider upgrading your current user or organization plan to benefit from higher allowances.
+Fetching 81 files:   1%|          | 1/81 [00:00<00:57,  1.39it/s]Fetching 81 files:   2%|▏         | 2/81 [00:00<00:34,  2.29it/s]Fetching 81 files:   7%|▋         | 6/81 [00:01<00:08,  8.39it/s]Fetching 81 files:   9%|▊         | 7/81 [00:19<00:08,  8.39it/s]Fetching 81 files:  10%|▉         | 8/81 [03:03<39:27, 32.43s/it]Fetching 81 files:  11%|█         | 9/81 [03:45<41:14, 34.37s/it]Fetching 81 files:  12%|█▏        | 10/81 [03:52<33:24, 28.23s/it]Fetching 81 files:  14%|█▎        | 11/81 [04:10<32:55, 28.23s/it]Fetching 81 files:  15%|█▍        | 12/81 [04:14<24:40, 21.46s/it]Fetching 81 files:  16%|█▌        | 13/81 [05:29<37:44, 33.30s/it]Fetching 81 files:  17%|█▋        | 14/81 [05:54<34:56, 31.29s/it]Fetching 81 files:  19%|█▊        | 15/81 [06:11<30:28, 27.70s/it]Fetching 81 files:  20%|█▉        | 16/81 [06:31<27:34, 25.45s/it]Fetching 81 files:  21%|██        | 17/81 [06:52<25:52, 24.25s/it]Fetching 81 files:  22%|██▏       | 18/81 [07:20<26:36, 25.35s/it]Fetching 81 files:  23%|██▎       | 19/81 [07:22<19:25, 18.81s/it]Fetching 81 files:  25%|██▍       | 20/81 [08:41<36:45, 36.16s/it]Fetching 81 files:  26%|██▌       | 21/81 [09:41<43:18, 43.31s/it]Fetching 81 files:  27%|██▋       | 22/81 [10:02<36:03, 36.67s/it]Fetching 81 files:  28%|██▊       | 23/81 [10:17<29:05, 30.10s/it]Fetching 81 files:  30%|██▉       | 24/81 [10:46<28:28, 29.97s/it]Fetching 81 files:  31%|███       | 25/81 [10:59<23:15, 24.93s/it]Fetching 81 files:  32%|███▏      | 26/81 [11:30<24:21, 26.57s/it]Fetching 81 files:  33%|███▎      | 27/81 [12:21<30:38, 34.05s/it]Fetching 81 files:  35%|███▍      | 28/81 [12:47<27:50, 31.53s/it]Fetching 81 files:  36%|███▌      | 29/81 [13:15<26:31, 30.61s/it]Fetching 81 files:  37%|███▋      | 30/81 [13:47<26:18, 30.96s/it]Fetching 81 files:  38%|███▊      | 31/81 [14:50<33:39, 40.39s/it]Fetching 81 files:  40%|███▉      | 32/81 [15:23<31:08, 38.14s/it]Fetching 81 files:  41%|████      | 33/81 [15:30<23:03, 28.83s/it]Fetching 81 files:  42%|████▏     | 34/81 [16:00<23:01, 29.40s/it]Fetching 81 files:  43%|████▎     | 35/81 [16:01<15:49, 20.63s/it]Fetching 81 files:  44%|████▍     | 36/81 [16:50<21:54, 29.22s/it]Fetching 81 files:  46%|████▌     | 37/81 [17:02<17:34, 23.97s/it]Fetching 81 files:  47%|████▋     | 38/81 [18:35<32:07, 44.82s/it]Fetching 81 files:  48%|████▊     | 39/81 [18:53<25:48, 36.88s/it]Fetching 81 files:  49%|████▉     | 40/81 [19:23<23:42, 34.69s/it]Fetching 81 files:  51%|█████     | 41/81 [19:47<20:56, 31.41s/it]Fetching 81 files:  52%|█████▏    | 42/81 [19:48<14:30, 22.31s/it]Fetching 81 files:  53%|█████▎    | 43/81 [20:38<19:22, 30.59s/it]Fetching 81 files:  54%|█████▍    | 44/81 [20:59<17:08, 27.80s/it]Fetching 81 files:  56%|█████▌    | 45/81 [21:46<20:11, 33.64s/it]Fetching 81 files:  57%|█████▋    | 46/81 [22:11<18:08, 31.09s/it]Fetching 81 files:  58%|█████▊    | 47/81 [22:49<18:40, 32.97s/it]Fetching 81 files:  59%|█████▉    | 48/81 [23:06<15:35, 28.35s/it]Fetching 81 files:  60%|██████    | 49/81 [23:22<13:10, 24.69s/it]Fetching 81 files:  62%|██████▏   | 50/81 [25:10<25:31, 49.41s/it]Fetching 81 files:  63%|██████▎   | 51/81 [25:10<17:20, 34.68s/it]Fetching 81 files:  64%|██████▍   | 52/81 [25:25<13:57, 28.89s/it]Fetching 81 files:  65%|██████▌   | 53/81 [25:26<09:29, 20.33s/it]Fetching 81 files:  67%|██████▋   | 54/81 [26:11<12:32, 27.87s/it]Fetching 81 files:  68%|██████▊   | 55/81 [26:13<08:40, 20.00s/it]Fetching 81 files:  69%|██████▉   | 56/81 [26:53<10:48, 25.94s/it]Fetching 81 files:  70%|███████   | 57/81 [28:15<17:11, 42.96s/it]Fetching 81 files:  72%|███████▏  | 58/81 [29:13<18:08, 47.35s/it]Fetching 81 files:  73%|███████▎  | 59/81 [29:20<12:56, 35.28s/it]Fetching 81 files:  74%|███████▍  | 60/81 [29:33<09:59, 28.54s/it]Fetching 81 files:  75%|███████▌  | 61/81 [29:40<07:24, 22.22s/it]Fetching 81 files:  77%|███████▋  | 62/81 [29:51<05:54, 18.66s/it]Fetching 81 files:  78%|███████▊  | 63/81 [30:57<09:53, 32.97s/it]Fetching 81 files:  79%|███████▉  | 64/81 [31:36<09:54, 34.95s/it]Fetching 81 files:  80%|████████  | 65/81 [31:42<06:58, 26.13s/it]Fetching 81 files:  81%|████████▏ | 66/81 [31:43<04:37, 18.52s/it]Fetching 81 files:  83%|████████▎ | 67/81 [32:15<05:16, 22.61s/it]Fetching 81 files:  84%|████████▍ | 68/81 [32:15<03:27, 15.93s/it]Fetching 81 files:  85%|████████▌ | 69/81 [32:16<02:17, 11.44s/it]Fetching 81 files:  86%|████████▋ | 70/81 [32:17<01:28,  8.08s/it]Fetching 81 files:  88%|████████▊ | 71/81 [32:23<01:17,  7.73s/it]Fetching 81 files:  89%|████████▉ | 72/81 [32:24<00:51,  5.73s/it]Fetching 81 files:  90%|█████████ | 73/81 [32:25<00:33,  4.23s/it]Fetching 81 files:  91%|█████████▏| 74/81 [32:32<00:34,  4.87s/it]Fetching 81 files:  93%|█████████▎| 75/81 [32:32<00:20,  3.48s/it]Fetching 81 files:  94%|█████████▍| 76/81 [33:09<01:08, 13.63s/it]Fetching 81 files:  95%|█████████▌| 77/81 [33:23<00:55, 13.81s/it]Fetching 81 files:  96%|█████████▋| 78/81 [34:07<01:07, 22.64s/it]Fetching 81 files:  98%|█████████▊| 79/81 [34:50<00:57, 28.93s/it]Fetching 81 files:  99%|█████████▉| 80/81 [35:00<00:23, 23.14s/it]Fetching 81 files: 100%|██████████| 81/81 [42:15<00:00, 146.81s/it]Fetching 81 files: 100%|██████████| 81/81 [42:15<00:00, 31.30s/it] 
+MODEL_READY Qwen/Qwen3.8-27B-FP8 /root/.cache/huggingface/hub/models--Qwen--Qwen3.8-27B-FP8/snapshots/c3a462cc3d38cf351f3b26cbd763469eeb74ef81
+Fetching 5 files:   0%|          | 0/5 [00:00<?, ?it/s]Fetching 5 files:  20%|██        | 1/5 [00:00<00:02,  1.54it/s]Fetching 5 files:  40%|████      | 2/5 [00:01<00:01,  1.97it/s]Fetching 5 files:  80%|████████  | 4/5 [00:02<00:00,  1.75it/s]Fetching 5 files: 100%|██████████| 5/5 [05:17<00:00, 97.88s/it]Fetching 5 files: 100%|██████████| 5/5 [05:17<00:00, 63.49s/it]
+MODEL_READY incoai/Qwen3.8-27B-DFlash2 /root/.cache/huggingface/hub/models--incoai--Qwen3.8-27B-DFlash2/snapshots/015e795645c74b1a0eeef3b570031fb62e769bc5
+NVIDIA H20, 0 MiB, 97871 MiB
+TORCH 2.14.0+cu132 CUDA True
+VLLM 0.1.dev1+gbf151b7eb.d20261122
+SETUP_OK

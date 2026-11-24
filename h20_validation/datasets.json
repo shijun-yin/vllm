@@ -1,0 +1,26 @@
+{
+  "blazedit": {
+    "type": "huggingface",
+    "repo": "vdaita/edit_5k_char",
+    "revision": "c00060332eb3f60ae7b2cd448caa45a83f25f1c3",
+    "file": "data/train-00000-of-00001-cd50d93ebdf7cd84.parquet",
+    "local": "blazedit_5k/data/train-00000-of-00001-cd50d93ebdf7cd84.parquet",
+    "sha256": "8c284ea22229530d3c1cbcca5448c024adce742d967ddc4ec6727f31fe576154"
+  },
+  "speed_bench": {
+    "type": "huggingface",
+    "repo": "nvidia/SPEED-Bench",
+    "revision": "fa4e669bee2a4393c56aa8ed05a7c667897f9590",
+    "file": "qualitative/test-00000-of-00001.parquet",
+    "local": "speed_bench/qualitative/test-00000-of-00001.parquet",
+    "sha256": "bb5ddc59123d0d3aebfb5bd70654dd6b56dde00a44b27153f408616073d08afb"
+  },
+  "spec_bench": {
+    "type": "github_contents",
+    "repo": "hemingkx/Spec-Bench",
+    "revision": "fd2c1cd7d2201ef71db4c5f4e455008f017967bf",
+    "file": "data/spec_bench/question.jsonl",
+    "local": "spec_bench/question.jsonl",
+    "sha256": "4b6d33e79484f9841c487ee87d1cf6aa8c6066f61d5d482ff09e5a007fafdf04"
+  }
+}

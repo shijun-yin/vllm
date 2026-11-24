@@ -1,0 +1,2307 @@
+diff --git a/.buildkite/test_areas/spec_decode.yaml b/.buildkite/test_areas/spec_decode.yaml
+index 7f9a265d66..3a2921baaa 100644
+--- a/.buildkite/test_areas/spec_decode.yaml
++++ b/.buildkite/test_areas/spec_decode.yaml
+@@ -320,6 +320,9 @@ steps:
+   device: h200_35gb
+   source_file_dependencies:
+     - vllm/sampling_params.py
++    - vllm/config/speculative.py
++    - vllm/config/vllm.py
++    - vllm/v1/worker/gpu/model_runner.py
+     - vllm/v1/spec_decode/
+     - vllm/v1/worker/gpu/sample/
+     - vllm/v1/worker/gpu/spec_decode/
+@@ -337,6 +340,9 @@ steps:
+       - image-build-amd
+       source_file_dependencies:
+       - vllm/sampling_params.py
++      - vllm/config/speculative.py
++      - vllm/config/vllm.py
++      - vllm/v1/worker/gpu/model_runner.py
+       - vllm/v1/spec_decode/
+       - vllm/v1/worker/gpu/sample/
+       - vllm/v1/worker/gpu/spec_decode/
+diff --git a/docs/features/speculative_decoding/README.md b/docs/features/speculative_decoding/README.md
+index ddc4997ccc..5cc5a62084 100644
+--- a/docs/features/speculative_decoding/README.md
++++ b/docs/features/speculative_decoding/README.md
+@@ -16,6 +16,7 @@ vLLM supports a variety of methods of speculative decoding. Model-based methods
+ - [Draft Model](draft_model.md)
+ - [N-Gram](n_gram.md)
+ - [Suffix Decoding](suffix.md)
++- [Suffix splice with MTP or DFlash](#suffix-splice-with-mtp-or-dflash)
+ - [Hidden State Extraction](extract_hidden_states.md)
+ - [Custom Speculators (Experimental)](#custom-speculators-experimental)
+ - [Dynamic Speculative Decoding](dynamic_speculative_decoding.md)
+@@ -64,6 +65,79 @@ Draft sampling defaults to `greedy`; set `draft_sample_method` to
+ Set `enable_adaptive_verification` to `true` in the speculative config to
+ enable [adaptive verification](adaptive_verification.md).
+ 
++## Suffix splice with MTP or DFlash
++
++Single-module MTP, standard DFlash, and DFlash2 can combine model drafts with
++suffix continuations from the request history and the cross-request corpus. Every
++request still publishes one linear draft, so target verification and sampling
++semantics are unchanged.
++
++For example, Qwen3.8-27B-FP8 uses its matching DFlash2 checkpoint with seven
++speculative tokens (the checkpoint's block size is eight):
++
++```bash
++vllm serve Qwen/Qwen3.8-27B-FP8 \
++  --language-model-only \
++  --reasoning-parser qwen3 \
++  --speculative-config '{
++    "method": "dflash",
++    "model": "incoai/Qwen3.8-27B-DFlash2",
++    "num_speculative_tokens": 7,
++    "suffix_hybrid_mode": "splice",
++    "suffix_hybrid_prefix_length": 1,
++    "suffix_hybrid_min_match_length": 4
++  }'
++```
++
++The generic configuration is:
++
++```python
++speculative_config = {
++    "method": "dflash",
++    "model": "<matching-dflash-model>",
++    "num_speculative_tokens": 15,
++    "suffix_hybrid_mode": "splice",
++    "suffix_hybrid_prefix_length": 1,
++    "suffix_hybrid_min_match_length": 4,
++}
++```
++
++Splice runs the model drafter for the full batch, then uses the first model
++tokens as a temporary lookup prefix and may replace the remaining tail on the
++GPU. Lookups discard candidates that cannot fill all `K - prefix` tokens before
++ranking them. Splice keeps the model chain when its tail is identical to the
++historical tail, so acceptance feedback is attributed to the model chain.
++
++Acceptance statistics are indexed by source, match-length bucket, and absolute
++draft position. Model and suffix comparisons use the same candidate bucket when
++one is available. Model maturity is evaluated at the first replaced position.
++Structured-output rows keep their model drafts and do not update these
++statistics; other rows continue to provide feedback. Lookup scans are bounded by
++the current batch's history-length upper bound, not just `max_model_len`.
++Finished-request corpus ingestion uses the scheduler's final trimmed token
++length. Set `suffix_hybrid_min_expected_accepted` to add an expected acceptance
++threshold after the statistics mature. Counts are halved every
++`suffix_hybrid_stats_half_life` feedback steps (default 1024).
++`suffix_hybrid_exploration_interval` is disabled by default. A positive interval
++N inverts the mature routing decision every N steps per batch row, collecting
++fresh comparison samples for both routes. Exploration still requires a valid
++full-length candidate and can override the expected-acceptance threshold.
++
++Splice requires greedy drafting and standard verification. It does not support
++adaptive verification, `prefill_context_kv_only`, watermarking, DBO, or
++microbatching. The prefix must be positive and smaller than
++`num_speculative_tokens`. The minimum match length must be positive and no
++greater than `suffix_decoding_max_tree_depth`. The expected acceptance threshold
++must be between zero and `num_speculative_tokens`, inclusive.
++
++The corpus limitations are the same as for [suffix decoding](suffix.md). Splice
++also uses process-wide acceptance statistics for routing, so seeded sampling is
++not guaranteed to be reproducible across unrelated traffic even when
++`suffix_decoding_corpus_tokens=0`; that setting disables token-corpus sharing,
++not routing-statistic sharing. Splice retains a dense GPU token history, so
++account for `max_num_seqs * max_model_len * 4` bytes in addition to the corpus
++and lookup scratch space.
++
+ ## Custom Speculators (Experimental)
+ 
+ You can plug in your own speculator by registering it as a speculative method
+diff --git a/tests/test_config.py b/tests/test_config.py
+index accd4e91dd..f7614457a1 100644
+--- a/tests/test_config.py
++++ b/tests/test_config.py
+@@ -1328,6 +1328,38 @@ def test_suffix_config_defaults():
+         SpeculativeConfig(method="suffix", suffix_decoding_corpus_tokens=-1)
+ 
+ 
++def test_suffix_hybrid_requires_model_drafter():
++    with pytest.raises(ValueError, match="requires method='mtp' or 'dflash'"):
++        SpeculativeConfig(method="suffix", suffix_hybrid_mode="splice")
++
++
++def test_suffix_splice_rejects_missing_dflash_width():
++    with pytest.raises(ValueError, match="num_speculative_tokens must be provided"):
++        SpeculativeConfig(method="dflash", suffix_hybrid_mode="splice")
++
++
++def test_suffix_splice_rejects_dbo(tmp_path):
++    with pytest.raises(ValueError, match="does not support DBO"):
++        _make_dflash2_spec(
++            tmp_path,
++            target_parallel_config=ParallelConfig(enable_dbo=True),
++        )
++
++
++@pytest.mark.parametrize(
++    ("field", "value", "match"),
++    [
++        ("suffix_decoding_max_tree_depth", 0, "must be >= 1"),
++        ("suffix_decoding_corpus_tokens", -1, "must be in"),
++        ("suffix_decoding_corpus_tokens", 1 << 31, "must be in"),
++        ("suffix_decoding_max_cached_requests", -1, "must be >= 0"),
++    ],
++)
++def test_suffix_hybrid_validates_suffix_limits(tmp_path, field, value, match):
++    with pytest.raises(ValueError, match=match):
++        _make_dflash2_spec(tmp_path, **{field: value})
++
++
+ def test_model_runner_supports_custom_logits_processors():
+     config = VllmConfig()
+     config.model_config = cast(
+@@ -2664,9 +2696,7 @@ def test_draft_model_enables_async_scheduling_by_default():
+     assert cfg.scheduler_config.async_scheduling is True
+ 
+ 
+-def test_dflash_allows_async_scheduling(tmp_path: Path):
+-    """DFlash must stay async-schedulable: it was the only parallel-drafting
+-    method excluded from the allowlist."""
++def _make_dflash2_spec(tmp_path: Path, architecture="DFlash2DraftModel", **kwargs):
+     from transformers import LlamaConfig
+ 
+     common = dict(
+@@ -2688,7 +2718,7 @@ def test_dflash_allows_async_scheduling(tmp_path: Path):
+         draft_path / "config.json",
+         dict(
+             common,
+-            architectures=["DFlash2DraftModel"],
++            architectures=[architecture],
+             model_type="qwen3",
+             num_hidden_layers=1,
+             layer_types=["sliding_attention"],
+@@ -2704,16 +2734,31 @@ def test_dflash_allows_async_scheduling(tmp_path: Path):
+             ),
+         ),
+     )
+-    parallel_config = ParallelConfig(distributed_executor_backend="uni")
++    parallel_config = kwargs.pop(
++        "target_parallel_config", ParallelConfig(distributed_executor_backend="uni")
++    )
+     model_config = ModelConfig(
+         model=str(target_path), tokenizer_mode="skip", max_model_len=2048
+     )
+     speculative_config = SpeculativeConfig(
+         method="dflash",
+         model=str(draft_path),
+-        num_speculative_tokens=3,
++        num_speculative_tokens=kwargs.pop("num_speculative_tokens", 3),
++        suffix_hybrid_mode=kwargs.pop("suffix_hybrid_mode", "splice"),
+         target_model_config=model_config,
+         target_parallel_config=parallel_config,
++        **kwargs,
++    )
++    return speculative_config, model_config, parallel_config
++
++
++@pytest.mark.parametrize("suffix_hybrid_mode", ["off", "splice"])
++def test_dflash2_splice_allows_async_scheduling(
++    tmp_path: Path, suffix_hybrid_mode: str
++):
++    """The candidate-head DFlash2 drafter supports splice and async scheduling."""
++    speculative_config, model_config, parallel_config = _make_dflash2_spec(
++        tmp_path, suffix_hybrid_mode=suffix_hybrid_mode
+     )
+     cfg = VllmConfig(
+         model_config=model_config,
+@@ -2726,9 +2771,52 @@ def test_dflash_allows_async_scheduling(tmp_path: Path):
+     )
+ 
+     assert speculative_config.method == "dflash"
++    assert type(speculative_config.speculator_config) is DFlash2SpeculatorConfig
+     assert cfg.scheduler_config.async_scheduling is True
+ 
+ 
++@pytest.mark.parametrize(
++    ("overrides", "match"),
++    [
++        ({"suffix_hybrid_prefix_length": 0}, "prefix_length"),
++        ({"suffix_hybrid_prefix_length": 3}, "prefix_length"),
++        ({"suffix_hybrid_min_match_length": 0}, "min_match_length"),
++        (
++            {
++                "suffix_decoding_max_tree_depth": 8,
++                "suffix_hybrid_min_match_length": 9,
++            },
++            "min_match_length",
++        ),
++        ({"suffix_hybrid_min_expected_accepted": -0.1}, "min_expected_accepted"),
++        ({"suffix_hybrid_min_expected_accepted": 3.1}, "min_expected_accepted"),
++        ({"suffix_hybrid_stats_half_life": 0}, "stats_half_life"),
++        ({"suffix_hybrid_exploration_interval": -1}, "exploration_interval"),
++        ({"draft_sample_method": "probabilistic"}, "greedy drafting"),
++        ({"rejection_sample_method": "synthetic"}, "standard target verification"),
++        ({"enable_adaptive_verification": True}, "does not support adaptive"),
++        ({"prefill_context_kv_only": True}, "does not support adaptive"),
++        (
++            {
++                "target_parallel_config": ParallelConfig(
++                    distributed_executor_backend="uni", enable_dbo=True
++                )
++            },
++            "DBO or microbatching",
++        ),
++    ],
++)
++def test_suffix_splice_rejects_invalid_dflash2_options(tmp_path, overrides, match):
++    with pytest.raises(ValueError, match=match):
++        _make_dflash2_spec(tmp_path, **overrides)
++
++
++@pytest.mark.parametrize("architecture", ["DSpineDraftModel", "LiLiCorrDraftModel"])
++def test_suffix_splice_rejects_other_dflash_families(tmp_path, architecture):
++    with pytest.raises(ValueError, match="Suffix splice supports only"):
++        _make_dflash2_spec(tmp_path, architecture=architecture)
++
++
+ @pytest.mark.skip_global_cleanup
+ @pytest.mark.parametrize("tp_size", [1, 2])
+ @pytest.mark.parametrize("target_ep", [False, True], ids=["ep-off", "ep-on"])
+@@ -5033,6 +5121,21 @@ def _watermarked_vllm_config() -> VllmConfig:
+     return config
+ 
+ 
++def test_suffix_splice_rejects_watermarking(tmp_path):
++    speculative_config, model_config, parallel_config = _make_dflash2_spec(tmp_path)
++    with pytest.raises(ValueError, match="does not support watermarking"):
++        VllmConfig(
++            model_config=model_config,
++            scheduler_config=SchedulerConfig(
++                max_model_len=2048,
++                is_encoder_decoder=False,
++            ),
++            parallel_config=parallel_config,
++            speculative_config=speculative_config,
++            watermark_config=WatermarkConfig(key=42),
++        )
++
++
+ def test_target_only_gumbel_allows_speculative_decoding(caplog_vllm, disable_log_dedup):
+     config = _watermarked_vllm_config()
+     config.watermark_config = WatermarkConfig(
+diff --git a/tests/v1/core/test_scheduler.py b/tests/v1/core/test_scheduler.py
+index 45e976ddaf..b7c3448c97 100644
+--- a/tests/v1/core/test_scheduler.py
++++ b/tests/v1/core/test_scheduler.py
+@@ -2182,6 +2182,9 @@ def test_stop_via_update_from_output():
+     assert requests[0].request_id in scheduler.finished_req_ids
+     assert list(requests[0].output_token_ids) == [10, 42]
+     assert list(requests[1].output_token_ids) == [13, 14]
++    assert scheduler_output.finished_req_token_lengths == {
++        requests[0].request_id: requests[0].num_tokens
++    }
+ 
+     # Test case 3: Stop on max tokens
+     scheduler = create_scheduler(num_speculative_tokens=2)
+diff --git a/tests/v1/e2e/spec_decode/ngram_suffix/test_ngram_suffix.py b/tests/v1/e2e/spec_decode/ngram_suffix/test_ngram_suffix.py
+index 8113a0b2cb..dfcaf30761 100644
+--- a/tests/v1/e2e/spec_decode/ngram_suffix/test_ngram_suffix.py
++++ b/tests/v1/e2e/spec_decode/ngram_suffix/test_ngram_suffix.py
+@@ -5,6 +5,7 @@ import math
+ 
+ import pytest
+ 
++from tests.models.utils import check_logprobs_close
+ from tests.utils import single_gpu_only
+ from vllm import SamplingParams
+ from vllm.config import CompilationConfig
+@@ -203,3 +204,229 @@ def test_ngram_verification_applies_logit_bias_and_min_p(
+         unfiltered, _ = generate(prompts, SamplingParams(**stochastic))
+         num_unfiltered_below = num_below_min_p(unfiltered)
+         assert num_unfiltered_below > 0
++
++
++def check_greedy_sequence_close(expected, actual, name):
++    assert len(expected) == len(actual)
++    for expected_output, actual_output in zip(expected, actual, strict=True):
++        expected_completion = expected_output.outputs[0]
++        actual_completion = actual_output.outputs[0]
++        assert len(expected_completion.token_ids) == len(actual_completion.token_ids)
++        assert expected_completion.finish_reason == actual_completion.finish_reason
++        check_logprobs_close(
++            outputs_0_lst=[
++                (
++                    expected_completion.token_ids,
++                    expected_completion.text,
++                    expected_completion.logprobs,
++                )
++            ],
++            outputs_1_lst=[
++                (
++                    actual_completion.token_ids,
++                    actual_completion.text,
++                    actual_completion.logprobs,
++                )
++            ],
++            name_0="target",
++            name_1=name,
++        )
++
++
++def check_greedy_output_close(expected, actual, name):
++    assert len(expected) == len(actual)
++    for expected_output, actual_output in zip(expected, actual, strict=True):
++        expected_completion = expected_output.outputs[0]
++        actual_completion = actual_output.outputs[0]
++        assert len(expected_completion.token_ids) == len(actual_completion.token_ids)
++        assert expected_completion.finish_reason == actual_completion.finish_reason
++        check_logprobs_close(
++            outputs_0_lst=[
++                (
++                    expected_completion.token_ids,
++                    expected_completion.text,
++                    expected_completion.logprobs,
++                )
++            ],
++            outputs_1_lst=[
++                (
++                    actual_completion.token_ids,
++                    actual_completion.text,
++                    actual_completion.logprobs,
++                )
++            ],
++            name_0="target",
++            name_1=name,
++            always_check_logprobs=True,
++        )
++        for position, (token_0, token_1) in enumerate(
++            zip(expected_completion.token_ids, actual_completion.token_ids)
++        ):
++            if token_0 != token_1:
++                break
++            logprob_0 = expected_completion.logprobs[position][token_0].logprob
++            logprob_1 = actual_completion.logprobs[position][token_1].logprob
++            assert math.isclose(logprob_0, logprob_1, rel_tol=1e-3, abs_tol=1e-3), (
++                f"{name}: logprob mismatch at {position}: {logprob_0} != {logprob_1}"
++            )
++
++
++class SpliceProbe:
++    def read_splice_state(self):
++        drafter = self.model_runner.speculator
++        splice = self.model_runner.splice
++        observed = (
++            int(splice.suffix_stats[..., 1].sum().item()) if splice is not None else 0
++        )
++        corpus_observed = (
++            int(
++                splice.suffix_stats[splice.suffix_stats.shape[0] // 2 :, ..., 1]
++                .sum()
++                .item()
++            )
++            if splice is not None
++            else 0
++        )
++        return type(drafter).__name__, observed, corpus_observed
++
++
++def check_splice_llm_correctness(
++    vllm_runner, model, speculative_config, common, expected_drafter
++):
++    prompts = [
++        (
++            "Repeat this exact sentence three times: The quick brown fox jumps over "
++            "the lazy dog."
++        ),
++        "Write a haiku about rain.",
++    ]
++
++    def generate(runner):
++        return runner.llm.generate(
++            prompts, SamplingParams(temperature=0, max_tokens=48, logprobs=5)
++        )
++
++    with vllm_runner(model, **common) as runner:
++        expected = generate(runner)
++
++    native_config = {
++        key: value
++        for key, value in speculative_config.items()
++        if not key.startswith("suffix_")
++    }
++    with vllm_runner(
++        model,
++        speculative_config=native_config,
++        **common,
++    ) as runner:
++        native = generate(runner)
++
++    with vllm_runner(
++        model,
++        speculative_config=speculative_config,
++        worker_extension_cls=f"{__name__}.SpliceProbe",
++        **common,
++    ) as runner:
++        cold = generate(runner)
++        drafter, cold_observed, cold_corpus_observed = runner.llm.collective_rpc(
++            "read_splice_state"
++        )[0]
++        hot = generate(runner)
++        _, hot_observed, hot_corpus_observed = runner.llm.collective_rpc(
++            "read_splice_state"
++        )[0]
++
++    check_greedy_sequence_close(expected, native, "native-drafter")
++    check_greedy_sequence_close(expected, cold, "splice-cold")
++    check_greedy_sequence_close(expected, hot, "splice-hot")
++    check_greedy_output_close(native, cold, "splice-cold")
++    check_greedy_output_close(native, hot, "splice-hot")
++    assert drafter == expected_drafter
++    assert hot_observed > cold_observed
++    assert hot_corpus_observed > cold_corpus_observed
++
++
++@single_gpu_only
++def test_suffix_splice_mtp_llm_correctness(vllm_runner):
++    check_splice_llm_correctness(
++        vllm_runner,
++        model="Qwen/Qwen3.5-0.8B-Base",
++        speculative_config={
++            "method": "mtp",
++            "num_speculative_tokens": 3,
++            "suffix_hybrid_mode": "splice",
++            "suffix_hybrid_min_match_length": 2,
++            "suffix_decoding_max_tree_depth": 8,
++            "suffix_decoding_corpus_tokens": 65536,
++        },
++        common=dict(
++            block_size=None,
++            max_model_len=1024,
++            enable_chunked_prefill=None,
++            enable_prefix_caching=False,
++            compilation_config=CompilationConfig(),
++            limit_mm_per_prompt={"image": 0, "video": 0},
++        ),
++        expected_drafter="MTPSpeculator",
++    )
++
++
++@single_gpu_only
++def test_suffix_splice_dflash2_llm_correctness(vllm_runner):
++    check_splice_llm_correctness(
++        vllm_runner,
++        model=(
++            "RedHatAI/Qwen3.5-4B-quantized.w4a16"
++            if current_platform.is_cuda()
++            else "Qwen/Qwen3.5-4B"
++        ),
++        speculative_config={
++            "method": "dflash",
++            "model": "vllm-project/Qwen3.5-4B-DFlash2",
++            "num_speculative_tokens": 7,
++            "suffix_hybrid_mode": "splice",
++            "suffix_hybrid_min_match_length": 2,
++            "suffix_decoding_max_tree_depth": 8,
++            "suffix_decoding_corpus_tokens": 65536,
++        },
++        common=dict(
++            block_size=None,
++            max_model_len=512,
++            max_num_seqs=1,
++            max_num_batched_tokens=256,
++            language_model_only=True,
++            enable_chunked_prefill=None,
++            enable_prefix_caching=False,
++            compilation_config=CompilationConfig(),
++            gpu_memory_utilization=0.98,
++        ),
++        expected_drafter="DFlash2Speculator",
++    )
++
++
++@single_gpu_only
++def test_suffix_splice_dflash_llm_correctness(vllm_runner):
++    check_splice_llm_correctness(
++        vllm_runner,
++        model="Qwen/Qwen3-4B-FP8" if current_platform.is_cuda() else "Qwen/Qwen3-4B",
++        speculative_config={
++            "method": "dflash",
++            "model": "z-lab/Qwen3-4B-DFlash-b16",
++            "num_speculative_tokens": 3,
++            "suffix_hybrid_mode": "splice",
++            "suffix_hybrid_min_match_length": 2,
++            "suffix_decoding_max_tree_depth": 8,
++            "suffix_decoding_corpus_tokens": 65536,
++        },
++        common=dict(
++            block_size=None,
++            max_model_len=512,
++            max_num_seqs=1,
++            max_num_batched_tokens=256,
++            enable_chunked_prefill=None,
++            enable_prefix_caching=False,
++            compilation_config=CompilationConfig(),
++            gpu_memory_utilization=0.9,
++        ),
++        expected_drafter="DFlashSpeculator",
++    )
+diff --git a/tests/v1/e2e/spec_decode/test_distribution_shift.py b/tests/v1/e2e/spec_decode/test_distribution_shift.py
+index 7cbe482761..3f3b1ed5e6 100644
+--- a/tests/v1/e2e/spec_decode/test_distribution_shift.py
++++ b/tests/v1/e2e/spec_decode/test_distribution_shift.py
+@@ -1,6 +1,7 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ 
++import math
+ from collections import Counter
+ 
+ import pytest
+@@ -9,42 +10,40 @@ from scipy.stats import chi2_contingency
+ 
+ from tests.utils import single_gpu_only
+ from vllm import SamplingParams
++from vllm.platforms import current_platform
+ from vllm.sampling_params import StructuredOutputsParams
+ 
+ from .utils import compute_acceptance_rate
+ 
+ 
+-@pytest.mark.parametrize("rejection_sample_method", ["standard", "block"])
+-@pytest.mark.parametrize("async_scheduling", [False, True], ids=["sync", "async"])
+-@single_gpu_only
+-def test_structured_output_preserves_sampling_distribution(
+-    rejection_sample_method, async_scheduling, vllm_runner
++def check_structured_output_preserves_sampling_distribution(
++    vllm_runner,
++    spec_config,
++    async_scheduling,
++    model="Qwen/Qwen3-4B",
++    num_samples=4000,
++    check_target_logprobs=False,
++    **runner_kwargs,
+ ):
+-    spec_config = {
+-        "method": "dflash",
+-        "model": "z-lab/Qwen3-4B-DFlash-b16",
+-        "num_speculative_tokens": 3,
+-        "draft_sample_method": "probabilistic",
+-        "rejection_sample_method": rejection_sample_method,
+-    }
+     regex = r'\{"city": "(Paris|Berlin|Madrid)"\}'
+-    num_samples = 4000
+     cities_counts = []
+     for config in (None, spec_config):
+         with vllm_runner(
+-            "Qwen/Qwen3-4B",
++            model,
+             speculative_config=config,
+             async_scheduling=async_scheduling,
+             enforce_eager=True,
+             enable_prefix_caching=False,
+             gpu_memory_utilization=0.8,
+             disable_log_stats=False,
++            **runner_kwargs,
+         ) as runner:
+             params = [
+                 SamplingParams(
+                     temperature=1.0,
+                     max_tokens=32,
+                     seed=i,
++                    logprobs=0 if check_target_logprobs else None,
+                     structured_outputs=StructuredOutputsParams(regex=regex),
+                 )
+                 for i in range(num_samples)
+@@ -62,10 +61,63 @@ def test_structured_output_preserves_sampling_distribution(
+             assert all(re.fullmatch(regex, text) for text in texts), (
+                 "Grammar-invalid output"
+             )
++            if check_target_logprobs:
++                for output in outputs:
++                    completion = output.outputs[0]
++                    assert completion.logprobs is not None
++                    for token_id, logprobs in zip(
++                        completion.token_ids, completion.logprobs, strict=True
++                    ):
++                        assert token_id in logprobs
++                        assert math.isfinite(logprobs[token_id].logprob)
+             cities_counts.append(Counter(texts))
+     assert_grammar_distribution_unchanged(*cities_counts)
+ 
+ 
++@pytest.mark.parametrize("rejection_sample_method", ["standard", "block"])
++@pytest.mark.parametrize("async_scheduling", [False, True], ids=["sync", "async"])
++@single_gpu_only
++def test_structured_output_preserves_sampling_distribution(
++    rejection_sample_method, async_scheduling, vllm_runner
++):
++    check_structured_output_preserves_sampling_distribution(
++        vllm_runner,
++        {
++            "method": "dflash",
++            "model": "z-lab/Qwen3-4B-DFlash-b16",
++            "num_speculative_tokens": 3,
++            "draft_sample_method": "probabilistic",
++            "rejection_sample_method": rejection_sample_method,
++        },
++        async_scheduling,
++    )
++
++
++@pytest.mark.parametrize("async_scheduling", [False, True], ids=["sync", "async"])
++@single_gpu_only
++def test_splice_preserves_sampling_distribution(async_scheduling, vllm_runner):
++    check_structured_output_preserves_sampling_distribution(
++        vllm_runner,
++        {
++            "method": "dflash",
++            "model": "z-lab/Qwen3-4B-DFlash-b16",
++            "num_speculative_tokens": 3,
++            "draft_sample_method": "greedy",
++            "rejection_sample_method": "standard",
++            "suffix_hybrid_mode": "splice",
++            "suffix_hybrid_min_match_length": 2,
++            "suffix_decoding_max_tree_depth": 8,
++            "suffix_decoding_corpus_tokens": 65536,
++        },
++        async_scheduling,
++        model=("Qwen/Qwen3-4B-FP8" if current_platform.is_cuda() else "Qwen/Qwen3-4B"),
++        num_samples=2000,
++        check_target_logprobs=True,
++        max_model_len=256,
++        max_num_seqs=256,
++    )
++
++
+ def assert_grammar_distribution_unchanged(counts1: Counter[str], counts2: Counter[str]):
+     outcomes = sorted(counts1.keys() | counts2.keys())
+     row1 = [counts1[outcome] for outcome in outcomes]
+diff --git a/tests/v1/spec_decode/test_hybrid_speculator.py b/tests/v1/spec_decode/test_hybrid_speculator.py
+new file mode 100644
+index 0000000000..ccf0c20702
+--- /dev/null
++++ b/tests/v1/spec_decode/test_hybrid_speculator.py
+@@ -0,0 +1,308 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++
++import pytest
++import torch
++
++from tests.v1.spec_decode.test_suffix_speculator import _make, _propose, _set
++from vllm.platforms import current_platform
++from vllm.v1.worker.gpu.spec_decode.hybrid.speculator import (
++    _hybrid_observe_kernel,
++    _hybrid_route_publish_kernel,
++)
++
++if not current_platform.is_cuda_alike():
++    pytest.skip("requires a CUDA-like GPU", allow_module_level=True)
++
++DEVICE = torch.device("cuda")
++
++
++def test_splice_route_maturity_prefix_and_identical_tail():
++    model = torch.tensor([[100, 101, 102]], dtype=torch.int64, device=DEVICE)
++    suffix = torch.tensor([[1000, 1001]], dtype=torch.int64, device=DEVICE)
++    model_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
++    suffix_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
++
++    def route():
++        return _route_single(model_stats, suffix_stats, model=model, suffix=suffix)
++
++    assert route()
++    suffix_stats[3, :, 0] = 8
++    suffix_stats[3, :, 1] = 8
++    assert not route()
++    model_stats[3, :, 1] = 8
++    assert route()
++    model_stats[3, :, 0] = 8
++    assert not route()
++
++    suffix_stats[3, :, 1] = 0
++    model[0, 0] = -1
++    assert not route()
++    model[0, 0] = 100
++    suffix.copy_(model[:, 1:])
++    assert not route()
++
++
++@pytest.mark.parametrize(
++    ("k", "stats_k"),
++    [(3, 3), (5, 5), (15, 15), (3, 5)],
++    ids=["k3", "k5", "k15", "dynamic-k3-of-5"],
++)
++def test_splice_publish_and_observe_last_slot(k, stats_k):
++    model = torch.arange(k, dtype=torch.int64, device=DEVICE).unsqueeze(0) + 100
++    suffix = torch.arange(k - 1, dtype=torch.int64, device=DEVICE).unsqueeze(0) + 1000
++    idx_mapping = torch.tensor([2], dtype=torch.int64, device=DEVICE)
++    output = torch.zeros((1, k), dtype=torch.int64, device=DEVICE)
++    last_use_suffix = torch.zeros(3, dtype=torch.bool, device=DEVICE)
++    last_buckets = torch.full((3,), -1, dtype=torch.int32, device=DEVICE)
++    last_valid = torch.zeros(3, dtype=torch.int32, device=DEVICE)
++    model_stats = torch.zeros((18, stats_k, 2), dtype=torch.int64, device=DEVICE)
++    suffix_stats = torch.zeros((18, stats_k, 2), dtype=torch.int64, device=DEVICE)
++    _hybrid_route_publish_kernel[(1,)](
++        torch.full((1,), k - 1, dtype=torch.int32, device=DEVICE),
++        torch.tensor([4], dtype=torch.int32, device=DEVICE),
++        torch.zeros(1, dtype=torch.int32, device=DEVICE),
++        model,
++        model.stride(0),
++        suffix,
++        suffix.stride(0),
++        model_stats,
++        suffix_stats,
++        torch.zeros(1, dtype=torch.bool, device=DEVICE),
++        idx_mapping,
++        torch.ones(1, dtype=torch.int32, device=DEVICE),
++        0,
++        output,
++        output.stride(0),
++        last_use_suffix,
++        last_buckets,
++        last_valid,
++        MIN_MATCH=4,
++        K=k,
++        STATS_K=stats_k,
++        K_PO2=1 << (k - 1).bit_length(),
++        PREFIX=1,
++        QUALITY_GATE=False,
++        MIN_EXPECTED=0.0,
++        EXPLORATION_INTERVAL=0,
++    )
++    assert output[0, 0].item() == 100
++    assert output[0, 1:].cpu().tolist() == suffix[0].cpu().tolist()
++    assert last_use_suffix[2].item()
++    assert last_valid[2].item() == k
++
++    _hybrid_observe_kernel[(1,)](
++        idx_mapping,
++        torch.zeros(1, dtype=torch.bool, device=DEVICE),
++        torch.tensor([2], dtype=torch.int32, device=DEVICE),
++        torch.tensor([1], dtype=torch.int32, device=DEVICE),
++        model_stats,
++        suffix_stats,
++        last_use_suffix,
++        last_buckets,
++        last_valid,
++        K=stats_k,
++        K_PO2=1 << (stats_k - 1).bit_length(),
++        PREFIX=1,
++    )
++    assert model_stats[3, 0].cpu().tolist() == [1, 1]
++    assert model_stats[:3].sum().item() == 0
++    assert model_stats[4:].sum().item() == 0
++    assert suffix_stats[3, 1].cpu().tolist() == [0, 1]
++    assert suffix_stats.sum().item() == 1
++    assert last_valid[2].item() == 0
++
++
++def _route_single(
++    model_stats,
++    suffix_stats,
++    model=None,
++    suffix=None,
++    prefix=1,
++    route_index=0,
++    exploration_interval=0,
++):
++    if model is None:
++        model = torch.tensor([[100, 101, 102]], dtype=torch.int64, device=DEVICE)
++    if suffix is None:
++        suffix = torch.tensor([[1000, 1001]], dtype=torch.int64, device=DEVICE)
++    k = model.shape[1]
++    stats_k = model_stats.shape[1]
++    output = torch.zeros((1, k), dtype=torch.int64, device=DEVICE)
++    last_use_suffix = torch.zeros(3, dtype=torch.bool, device=DEVICE)
++    last_buckets = torch.full((3,), -1, dtype=torch.int32, device=DEVICE)
++    last_valid = torch.zeros(3, dtype=torch.int32, device=DEVICE)
++    _hybrid_route_publish_kernel[(1,)](
++        torch.tensor([k - prefix], dtype=torch.int32, device=DEVICE),
++        torch.tensor([4], dtype=torch.int32, device=DEVICE),
++        torch.zeros(1, dtype=torch.int32, device=DEVICE),
++        model,
++        model.stride(0),
++        suffix,
++        suffix.stride(0),
++        model_stats,
++        suffix_stats,
++        torch.zeros(1, dtype=torch.bool, device=DEVICE),
++        torch.tensor([2], dtype=torch.int64, device=DEVICE),
++        torch.ones(1, dtype=torch.int32, device=DEVICE),
++        route_index,
++        output,
++        output.stride(0),
++        last_use_suffix,
++        last_buckets,
++        last_valid,
++        MIN_MATCH=4,
++        K=k,
++        STATS_K=stats_k,
++        K_PO2=1 << (k - 1).bit_length(),
++        PREFIX=prefix,
++        QUALITY_GATE=False,
++        MIN_EXPECTED=0.0,
++        EXPLORATION_INTERVAL=exploration_interval,
++    )
++    return last_use_suffix[2].item()
++
++
++def test_splice_model_early_rejection_does_not_block_maturity():
++    model_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
++    suffix_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
++    model_stats[3, :, 0] = torch.tensor([8, 0, 0], device=DEVICE)
++    model_stats[3, :, 1] = torch.tensor([8, 8, 0], device=DEVICE)
++    suffix_stats[3, :, 0] = 8
++    suffix_stats[3, :, 1] = 8
++
++    assert _route_single(model_stats, suffix_stats)
++
++
++def test_splice_compares_model_and_suffix_in_same_bucket():
++    model_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
++    suffix_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
++    model_stats[3, :, 0] = 95
++    model_stats[3, :, 1] = 100
++    model_stats[0, :, 0] = 30
++    model_stats[0, :, 1] = 100
++    suffix_stats[3, :, 0] = 80
++    suffix_stats[3, :, 1] = 100
++
++    assert not _route_single(model_stats, suffix_stats)
++
++
++def test_splice_bounded_exploration_collects_both_routes():
++    model_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
++    suffix_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
++    model_stats[3, :, 0] = 95
++    model_stats[3, :, 1] = 100
++    suffix_stats[3, :, 0] = 80
++    suffix_stats[3, :, 1] = 100
++
++    assert not _route_single(model_stats, suffix_stats)
++    assert _route_single(model_stats, suffix_stats, exploration_interval=1)
++
++    model_stats[3, :, 0] = 0
++    suffix_stats[3, :, 0] = 100
++    assert _route_single(model_stats, suffix_stats)
++    assert not _route_single(model_stats, suffix_stats, exploration_interval=1)
++
++
++def test_splice_structured_output_skips_only_masked_rows():
++    model_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
++    suffix_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
++    last_use_suffix = torch.zeros(2, dtype=torch.bool, device=DEVICE)
++    last_buckets = torch.full((2,), 3, dtype=torch.int32, device=DEVICE)
++    last_valid = torch.full((2,), 2, dtype=torch.int32, device=DEVICE)
++    _hybrid_observe_kernel[(2,)](
++        torch.tensor([0, 1], dtype=torch.int64, device=DEVICE),
++        torch.tensor([False, True], dtype=torch.bool, device=DEVICE),
++        torch.tensor([2, 2], dtype=torch.int32, device=DEVICE),
++        torch.tensor([1, 1], dtype=torch.int32, device=DEVICE),
++        model_stats,
++        suffix_stats,
++        last_use_suffix,
++        last_buckets,
++        last_valid,
++        K=3,
++        K_PO2=4,
++        PREFIX=1,
++    )
++
++    assert model_stats[3, 0].cpu().tolist() == [1, 1]
++    assert model_stats[3, 1].cpu().tolist() == [0, 1]
++    assert model_stats[3, 2:].sum().item() == 0
++    assert suffix_stats.sum().item() == 0
++    assert last_valid.tolist() == [0, 0]
++
++
++def run_suffix_query(history, num_tokens, prefix=(), docs=(), min_match=4, max_len=64):
++    spec, req_states = _make(
++        num_tokens, 8, 1, max_len, corpus_tokens=1024 if docs else 0
++    )
++    spec.vllm_config.speculative_config.suffix_hybrid_min_match_length = min_match
++    for index, doc in enumerate(docs):
++        _set(req_states, 0, [], doc)
++        req_states.req_id_to_index = {f"doc-{index}": 0}
++        spec.on_requests_finished({f"doc-{index}"})
++
++    _set(req_states, 0, [], history)
++    before = req_states.all_token_ids.gpu.clone()
++    query_prefix = torch.zeros(
++        (1, max(1, len(prefix))), dtype=torch.int64, device=DEVICE
++    )
++    if prefix:
++        query_prefix[0, : len(prefix)] = torch.tensor(
++            prefix, dtype=torch.int64, device=DEVICE
++        )
++    drafts, num_valid = _propose(
++        spec,
++        req_states,
++        [0],
++        hybrid=(query_prefix, len(prefix), num_tokens),
++    )
++    assert torch.equal(req_states.all_token_ids.gpu, before)
++    return (
++        drafts[0, :num_tokens].tolist(),
++        int(num_valid[0]),
++        int(spec.match_lens[0].item()),
++    )
++
++
++def test_splice_lookup_changes_continuation_without_mutating_history():
++    history = [1, 2, 3, 7, 8, 1, 2, 4, 9, 1, 2]
++    assert run_suffix_query(history, 3, min_match=2) == ([4, 9, 1], 3, 2)
++    assert run_suffix_query(history, 2, prefix=[3], min_match=2) == ([7, 8], 2, 3)
++
++
++def test_splice_lookup_requires_full_tail():
++    assert run_suffix_query([0, 1, 0, 1, 0], 2, prefix=[1], min_match=2) == (
++        [0, 1],
++        2,
++        2,
++    )
++
++
++def test_splice_corpus_filters_partial_and_short_matches():
++    partial_docs = [
++        [0, 1, 0, 1, 9],
++        [8, 0, 1, 20, 21],
++        [8, 0, 1, 30, 31],
++        [8, 0, 1, 40, 41],
++    ]
++    assert run_suffix_query(
++        [5, 0, 1, 0], 2, prefix=[1], docs=partial_docs, min_match=2
++    ) == ([40, 41], 2, 2)
++    short_match_docs = [
++        [0, 1, 0, 1, 20, 21],
++        [0, 1, 0, 1, 30, 31],
++        [0, 1, 0, 1, 40, 41],
++        *([[8, 0, 1, 50, 51]] * 4),
++    ]
++    assert run_suffix_query(
++        [5, 0, 1, 0], 2, prefix=[1], docs=short_match_docs, min_match=4
++    ) == ([40, 41], 2, 4)
++
++
++def test_splice_prefix_does_not_read_past_history_allocation():
++    assert run_suffix_query([1, 2, 3, 4, 5, 6, 7, 8], 2, prefix=[9, 10], max_len=8) == (
++        [8, 8],
++        0,
++        0,
++    )
+diff --git a/tests/v1/spec_decode/test_suffix_speculator.py b/tests/v1/spec_decode/test_suffix_speculator.py
+index e2f01b752d..3abbf77543 100644
+--- a/tests/v1/spec_decode/test_suffix_speculator.py
++++ b/tests/v1/spec_decode/test_suffix_speculator.py
+@@ -10,9 +10,10 @@ import torch
+ 
+ from vllm.platforms import current_platform
+ 
+-if not current_platform.is_cuda():
+-    pytest.skip("requires CUDA", allow_module_level=True)
++if not current_platform.is_cuda_alike():
++    pytest.skip("requires a CUDA-like GPU", allow_module_level=True)
+ 
++from vllm.v1.worker.gpu.input_batch import InputBatch, InputBuffers  # noqa: E402
+ from vllm.v1.worker.gpu.spec_decode.suffix.speculator import (  # noqa: E402
+     SuffixSpeculator,
+ )
+@@ -83,7 +84,7 @@ def _finish(spec, req_states, slot_by_id):
+     spec.on_requests_finished(list(slot_by_id))
+ 
+ 
+-def _propose(spec, req_states, slots, num_sampled=None, num_rejected=None):
++def _propose(spec, req_states, slots, num_sampled=None, num_rejected=None, hybrid=None):
+     n = len(slots)
+     max_reqs = req_states.total_len.gpu.shape[0]
+     last_sampled = torch.zeros(max_reqs, 1, dtype=torch.int64, device=DEVICE)
+@@ -94,24 +95,41 @@ def _propose(spec, req_states, slots, num_sampled=None, num_rejected=None):
+         num_reqs=n,
+         idx_mapping=torch.tensor(slots, dtype=torch.int32, device=DEVICE),
+         idx_mapping_np=np.array(slots),
++        seq_lens_cpu_upper_bound=torch.tensor(
++            [int(req_states.total_len.gpu[slot]) for slot in slots],
++            dtype=torch.int32,
++            device=DEVICE,
++        ),
+     )
+     if num_sampled is None:
+         num_sampled = [1] * n
+     if num_rejected is None:
+         num_rejected = [0] * n
+-    drafts = spec.propose(
+-        batch,
+-        None,
+-        None,
+-        None,
+-        None,
+-        torch.tensor(num_sampled, dtype=torch.int32, device=DEVICE),
+-        torch.tensor(num_rejected, dtype=torch.int32, device=DEVICE),
+-        last_sampled,
+-        None,
+-        None,
+-        None,
+-    )
++    sampled = torch.tensor(num_sampled, dtype=torch.int32, device=DEVICE)
++    if hybrid is None:
++        drafts = spec.propose(
++            batch,
++            None,
++            None,
++            None,
++            None,
++            sampled,
++            torch.tensor(num_rejected, dtype=torch.int32, device=DEVICE),
++            last_sampled,
++            None,
++            None,
++            None,
++        )
++    else:
++        query_prefix, prefix_len, num_tokens = hybrid
++        drafts = spec.propose_hybrid(
++            batch,
++            sampled,
++            last_sampled,
++            num_tokens,
++            query_prefix=query_prefix,
++            prefix_len=prefix_len,
++        )
+     return drafts.cpu().numpy(), spec.num_valid[:n].cpu().numpy()
+ 
+ 
+@@ -467,3 +485,24 @@ def test_reused_slot_does_not_inherit_verification_stats():
+ def test_short_tree_depth_disables_the_corpus():
+     spec, _ = _make(3, 1, 2, 64, corpus_tokens=1024)
+     assert not spec.has_corpus
++
++
++def test_scan_blocks_follow_history_upper_bound():
++    spec, _ = _make(2, 8, 1, 1024, corpus_tokens=0)
++    batch = InputBatch.make_dummy(1, 32, InputBuffers(1, 1024, device=DEVICE))
++    assert spec._num_scan_blocks(batch, 0) == 1
++    assert spec._num_scan_blocks(batch, 2) == 1
++    batch.seq_lens_cpu_upper_bound.fill_(1024)
++    assert spec._num_scan_blocks(batch, 0) == 4
++
++
++def test_corpus_ingestion_uses_scheduler_trimmed_length():
++    spec, req_states = _make(3, 8, 1, 64, corpus_tokens=1024)
++    _set(req_states, 0, [1, 2], [7, 8, 9, 10])
++    req_states.req_id_to_index = {"done": 0}
++
++    spec.on_requests_finished_with_lengths(["done"], {"done": 4})
++
++    assert spec.corpus[:5].cpu().tolist() == [1, 2, 7, 8, -1]
++    assert 9 not in spec.corpus
++    assert 10 not in spec.corpus
+diff --git a/tests/v1/spec_decode/utils.py b/tests/v1/spec_decode/utils.py
+index 99b1f311d6..ee2645bfa7 100644
+--- a/tests/v1/spec_decode/utils.py
++++ b/tests/v1/spec_decode/utils.py
+@@ -28,7 +28,9 @@ def fake_speculative_config(
+     that aren't fields are taken from the speculator config, like
+     SpeculativeConfig's shortcuts to its properties.
+     """
+-    spec = _FakeSpeculativeConfig(**{"custom_method": None, **fields})
++    spec = _FakeSpeculativeConfig(
++        **{"custom_method": None, "suffix_hybrid_mode": "off", **fields}
++    )
+     if speculator_config_cls is None:
+         probe = SimpleNamespace(
+             method=fields["method"],
+diff --git a/vllm/config/speculative.py b/vllm/config/speculative.py
+index 1c567e9354..931196089e 100644
+--- a/vllm/config/speculative.py
++++ b/vllm/config/speculative.py
+@@ -612,6 +612,27 @@ class SpeculativeConfig:
+     """Deprecated and has no effect: the GPU suffix speculator always drafts
+     `num_speculative_tokens` tokens."""
+ 
++    suffix_hybrid_mode: Literal["off", "splice"] = "off"
++    """Combine suffix proposals with MTP or DFlash. `splice` retains a model
++    prefix and selects a suffix tail on the GPU."""
++
++    suffix_hybrid_min_match_length: int = 4
++    """Minimum context match length, in `[1, suffix_decoding_max_tree_depth]`."""
++
++    suffix_hybrid_prefix_length: int = 1
++    """Number of model draft tokens retained before a splice lookup."""
++
++    suffix_hybrid_min_expected_accepted: float | None = None
++    """Optional minimum expected accepted draft tokens, in
++    `[0, num_speculative_tokens]`."""
++
++    suffix_hybrid_stats_half_life: int = 1024
++    """Number of feedback steps before splice acceptance counts are halved."""
++
++    suffix_hybrid_exploration_interval: int = 0
++    """Invert the mature splice routing decision every N steps per batch row to
++    collect comparison samples. Zero disables exploration."""
++
+     draft_load_config: LoadConfig | None = None
+     """Load config for the draft model. If not specified, will use the load
+     config from the target model."""
+@@ -762,6 +783,12 @@ class SpeculativeConfig:
+             "suffix_decoding_corpus_tokens",
+             "suffix_decoding_max_spec_factor",
+             "suffix_decoding_min_token_prob",
++            "suffix_hybrid_mode",
++            "suffix_hybrid_min_match_length",
++            "suffix_hybrid_prefix_length",
++            "suffix_hybrid_min_expected_accepted",
++            "suffix_hybrid_stats_half_life",
++            "suffix_hybrid_exploration_interval",
+             "draft_load_config",
+             "rejection_sample_method",
+             "synthetic_acceptance_rates",
+@@ -1517,6 +1544,86 @@ class SpeculativeConfig:
+                 "materializes. Disable one of them."
+             )
+ 
++        if self.suffix_hybrid_mode != "off":
++            if self.num_speculative_tokens is None:
++                raise ValueError(
++                    "num_speculative_tokens must be provided with "
++                    "speculative model unless the draft model config contains an "
++                    "n_predict parameter."
++                )
++            from vllm.v1.worker.gpu.spec_decode.suffix.config import (
++                validate_suffix_decoding_parameters,
++            )
++
++            validate_suffix_decoding_parameters(self)
++            if self.method not in ("mtp", "dflash"):
++                raise ValueError(
++                    "Suffix splice decoding requires method='mtp' or 'dflash'."
++                )
++            from vllm.v1.worker.gpu.spec_decode.dflash.config import (
++                DFlashSpeculatorConfig,
++            )
++            from vllm.v1.worker.gpu.spec_decode.dflash2.config import (
++                DFlash2SpeculatorConfig,
++            )
++            from vllm.v1.worker.gpu.spec_decode.mtp.config import (
++                MTPSpeculatorConfig,
++            )
++
++            if self.custom_method is not None or config_cls not in (
++                MTPSpeculatorConfig,
++                DFlashSpeculatorConfig,
++                DFlash2SpeculatorConfig,
++            ):
++                raise ValueError(
++                    "Suffix splice supports only built-in single-module MTP, "
++                    "standard DFlash, and DFlash2."
++                )
++            if self.method == "mtp" and self.use_multi_module_mtp():
++                raise ValueError("Suffix splice decoding supports single-module MTP.")
++            if self.draft_sample_method != "greedy":
++                raise ValueError("Suffix splice decoding requires greedy drafting.")
++            if self.rejection_sample_method != "standard":
++                raise ValueError(
++                    "Suffix splice decoding requires standard target verification."
++                )
++            if self.enable_adaptive_verification or self.prefill_context_kv_only:
++                raise ValueError(
++                    "Suffix splice decoding does not support adaptive verification "
++                    "or prefill_context_kv_only."
++                )
++            if (
++                not 0
++                < self.suffix_hybrid_min_match_length
++                <= (self.suffix_decoding_max_tree_depth)
++            ):
++                raise ValueError(
++                    "suffix_hybrid_min_match_length must be positive and no greater "
++                    "than suffix_decoding_max_tree_depth."
++                )
++            threshold = self.suffix_hybrid_min_expected_accepted
++            if threshold is not None and not (
++                0 <= threshold <= self.num_speculative_tokens
++            ):
++                raise ValueError(
++                    "suffix_hybrid_min_expected_accepted must be between zero and "
++                    "num_speculative_tokens."
++                )
++            if self.suffix_hybrid_stats_half_life <= 0:
++                raise ValueError("suffix_hybrid_stats_half_life must be positive.")
++            if self.suffix_hybrid_exploration_interval < 0:
++                raise ValueError("suffix_hybrid_exploration_interval must be >= 0.")
++            if not (0 < self.suffix_hybrid_prefix_length < self.num_speculative_tokens):
++                raise ValueError(
++                    "suffix_hybrid_prefix_length must be positive and smaller than "
++                    "num_speculative_tokens in splice mode."
++                )
++            parallel = self.target_parallel_config
++            if parallel is not None and parallel.use_ubatching:
++                raise ValueError(
++                    "Suffix splice decoding does not support DBO or microbatching."
++                )
++
+         return self
+ 
+     @property
+diff --git a/vllm/config/vllm.py b/vllm/config/vllm.py
+index 6f2919855d..f51efa695f 100644
+--- a/vllm/config/vllm.py
++++ b/vllm/config/vllm.py
+@@ -1439,6 +1439,10 @@ class VllmConfig:
+             return False
+         if self.speculative_config is not None:
+             speculative_config = self.speculative_config
++            if speculative_config.suffix_hybrid_mode != "off":
++                raise ValueError(
++                    "Suffix splice decoding does not support watermarking."
++                )
+             if speculative_config.draft_sample_method != "probabilistic":
+                 raise ValueError(
+                     "Speculative decoding with watermarking requires "
+diff --git a/vllm/v1/core/sched/output.py b/vllm/v1/core/sched/output.py
+index 4c46c6c2de..1d7963233d 100644
+--- a/vllm/v1/core/sched/output.py
++++ b/vllm/v1/core/sched/output.py
+@@ -285,9 +285,15 @@ class SchedulerOutput:
+     # Only used for v2 model runner.
+     preempted_req_ids: set[str] | None = None
+ 
++    # Final scheduler-trimmed lengths for suffix-corpus ingestion.
++    finished_req_token_lengths: dict[str, int] = field(default_factory=dict)
++
+     # Whether any of the scheduled requests use structured output.
+     # Set only in async scheduling case.
+     has_structured_output_requests: bool = False
++    # Request IDs with active structured output constraints, for per-request
++    # speculative-decoding feedback masks.
++    structured_output_req_ids: set[str] = field(default_factory=set)
+ 
+     # Whether any scheduled request uses structured output with speculative
+     # decoding. Set only in async scheduling case.
+diff --git a/vllm/v1/core/sched/scheduler.py b/vllm/v1/core/sched/scheduler.py
+index 0373c64773..a32bcbc50f 100644
+--- a/vllm/v1/core/sched/scheduler.py
++++ b/vllm/v1/core/sched/scheduler.py
+@@ -1900,6 +1900,8 @@ class Scheduler(SchedulerInterface):
+             scheduler_output.has_structured_output_requests |= (
+                 request.use_structured_output and not request.is_prefill_chunk
+             )
++            if request.use_structured_output and not request.is_prefill_chunk:
++                scheduler_output.structured_output_req_ids.add(req_id)
+             # Drop from the in-flight-prefill set once it's no longer prefilling.
+             if not request.is_prefill_chunk:
+                 self._inflight_prefills.discard(request)
+@@ -2582,8 +2584,12 @@ class Scheduler(SchedulerInterface):
+                 # Capture finish_reason BEFORE _handle_stopped_request, which may
+                 # reset the status to WAITING for streaming requests that continue.
+                 finish_reason = request.get_finished_reason()
++                final_token_length = request.num_tokens
+                 finished = self._handle_stopped_request(request)
+                 if finished:
++                    scheduler_output.finished_req_token_lengths[req_id] = (
++                        final_token_length
++                    )
+                     kv_transfer_params, ec_transfer_params = self._free_request(request)
+                     if (
+                         prefill_stats is not None
+diff --git a/vllm/v1/worker/gpu/input_batch.py b/vllm/v1/worker/gpu/input_batch.py
+index f5ca37a714..fc8dfab409 100644
+--- a/vllm/v1/worker/gpu/input_batch.py
++++ b/vllm/v1/worker/gpu/input_batch.py
+@@ -1,7 +1,7 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ from collections.abc import Sequence
+-from dataclasses import dataclass
++from dataclasses import dataclass, field
+ from typing import TYPE_CHECKING
+ 
+ import numpy as np
+@@ -130,6 +130,7 @@ class InputBatch:
+     # [num_reqs] admitted draft counts in flight to the host. Set only under
+     # adaptive verification with batch-sharded sampling, when the budget binds.
+     num_admitted_draft_tokens: "AdmittedDraftCounts | None" = None
++    structured_output_req_ids: set[str] = field(default_factory=set)
+ 
+     @classmethod
+     def make_dummy(
+diff --git a/vllm/v1/worker/gpu/model_runner.py b/vllm/v1/worker/gpu/model_runner.py
+index 1f831da6ff..68c23bb6bc 100644
+--- a/vllm/v1/worker/gpu/model_runner.py
++++ b/vllm/v1/worker/gpu/model_runner.py
+@@ -291,9 +291,12 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+ 
+         self.num_speculative_steps = vllm_config.num_speculative_tokens
+         num_prefill_lookahead = max(1, vllm_config.num_prefill_lookahead_tokens)
+-        use_dense_all_token_ids = (
+-            self.speculative_config is not None
+-            and self.speculative_config.speculator_config.prefer_dense_token_history
++        use_dense_all_token_ids = self.speculative_config is not None and (
++            self.speculative_config.speculator_config.prefer_dense_token_history
++            or (
++                self.is_last_pp_rank
++                and self.speculative_config.suffix_hybrid_mode != "off"
++            )
+         )
+ 
+         # General request states.
+@@ -310,12 +313,14 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+ 
+         # Speculative decoding.
+         self.speculator = None
++        self.splice = None
+         self.use_aux_hidden_state_outputs = False
+         if self.speculative_config is not None:
+             if self.is_last_pp_rank:
+                 self.speculator = init_speculator(
+                     self.vllm_config, self.device, self.req_states
+                 )
++                self.splice = getattr(self.speculator, "suffix_splice", None)
+ 
+             self.use_aux_hidden_state_outputs = (
+                 self.speculative_config.uses_aux_hidden_states
+@@ -1283,7 +1288,16 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+             # Preempted docs keep their query-use reservation until rescheduled.
+             self.pooling_runner.on_requests_finished(finished_req_ids)
+         if self.speculator is not None and finished_req_ids:
+-            self.speculator.on_requests_finished(finished_req_ids)
++            if hasattr(self.speculator, "on_requests_finished_with_lengths"):
++                self.speculator.on_requests_finished_with_lengths(
++                    finished_req_ids, scheduler_output.finished_req_token_lengths
++                )
++            else:
++                self.speculator.on_requests_finished(finished_req_ids)
++        if self.splice is not None and finished_req_ids:
++            self.splice.on_requests_finished_with_lengths(
++                finished_req_ids, scheduler_output.finished_req_token_lengths
++            )
+         preempted_req_ids = scheduler_output.preempted_req_ids
+         if preempted_req_ids:
+             finished_req_ids = finished_req_ids.union(preempted_req_ids)
+@@ -1329,6 +1343,8 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+                 self.adaptive_verification.add_request(req_index)
+             if self.speculator is not None:
+                 self.speculator.add_request(req_index, new_req_data)
++            if self.splice is not None:
++                self.splice.add_request(req_index, new_req_data)
+ 
+             if self.pooling_runner is not None:
+                 assert new_req_data.pooling_params is not None
+@@ -1680,6 +1696,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+             cu_num_logits=cu_num_logits,
+             cu_num_logits_np=cu_num_logits_np,
+             has_structured_output_reqs=scheduler_output.has_structured_output_requests,
++            structured_output_req_ids=scheduler_output.structured_output_req_ids,
+             prompt_lens=prompt_lens,
+             fast_prefill=fast_prefill,
+             max_query_len=(
+@@ -2420,6 +2437,8 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+                 self.speculator.prepare_propose(
+                     input_batch, num_sampled, num_rejected, self.sampler
+                 )
++            if self.splice is not None:
++                self.splice.prepare_propose(input_batch, num_sampled, num_rejected)
+             spec_hidden_states = get_drafter_hidden_states(
+                 self.model, draft_hidden_states
+             )
+@@ -2440,10 +2459,20 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+                     dp_sync_state=dp_sync_state,
+                     mm_inputs=mm_inputs,
+                 )
++                if self.splice is not None:
++                    draft_tokens = self.splice.postprocess(
++                        draft_tokens,
++                        input_batch,
++                        num_sampled,
++                        self.req_states.last_sampled_tokens,
++                        num_spec_tokens,
++                    )
+             if self.pcp_manager is not None:
+                 self.pcp_manager.sync_drafts(
+                     draft_tokens, input_batch.idx_mapping, self.speculator.draft_logits
+                 )
++                if self.splice is not None:
++                    self.splice.sync_drafts_metadata()
+             if num_spec_tokens < self.num_speculative_steps:
+                 draft_tokens[:, num_spec_tokens:] = -1
+             self.req_states.draft_tokens[input_batch.idx_mapping] = draft_tokens
+diff --git a/vllm/v1/worker/gpu/spec_decode/__init__.py b/vllm/v1/worker/gpu/spec_decode/__init__.py
+index 6ec9afdd41..d1fbff4028 100644
+--- a/vllm/v1/worker/gpu/spec_decode/__init__.py
++++ b/vllm/v1/worker/gpu/spec_decode/__init__.py
+@@ -25,7 +25,10 @@ def init_speculator(
+     The speculator is constructed with `(vllm_config, device)`, plus
+     `req_states` if its constructor accepts it.
+     """
+-    from vllm.v1.worker.gpu.spec_decode.speculator import BaseSpeculator
++    from vllm.v1.worker.gpu.spec_decode.speculator import (
++        BaseSpeculator,
++        DraftModelSpeculator,
++    )
+ 
+     speculative_config = vllm_config.speculative_config
+     assert speculative_config is not None
+@@ -45,5 +48,13 @@ def init_speculator(
+     # BaseSpeculator doesn't define the constructor signature.
+     factory = cast(Callable[..., "BaseSpeculator"], speculator_cls)
+     if "req_states" in inspect.signature(factory).parameters:
+-        return factory(vllm_config, device, req_states=req_states)
+-    return factory(vllm_config, device)
++        speculator = factory(vllm_config, device, req_states=req_states)
++    else:
++        speculator = factory(vllm_config, device)
++    if speculative_config.suffix_hybrid_mode != "off":
++        from vllm.v1.worker.gpu.spec_decode.hybrid.speculator import SuffixSplice
++
++        if not isinstance(speculator, DraftModelSpeculator):
++            raise TypeError("Suffix splice requires a draft model speculator.")
++        speculator.suffix_splice = SuffixSplice(vllm_config, device, req_states)
++    return speculator
+diff --git a/vllm/v1/worker/gpu/spec_decode/hybrid/__init__.py b/vllm/v1/worker/gpu/spec_decode/hybrid/__init__.py
+new file mode 100644
+index 0000000000..208f01a7cb
+--- /dev/null
++++ b/vllm/v1/worker/gpu/spec_decode/hybrid/__init__.py
+@@ -0,0 +1,2 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+diff --git a/vllm/v1/worker/gpu/spec_decode/hybrid/speculator.py b/vllm/v1/worker/gpu/spec_decode/hybrid/speculator.py
+new file mode 100644
+index 0000000000..95c85b4c9a
+--- /dev/null
++++ b/vllm/v1/worker/gpu/spec_decode/hybrid/speculator.py
+@@ -0,0 +1,378 @@
++# SPDX-License-Identifier: Apache-2.0
++# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
++
++from typing import TYPE_CHECKING
++
++import torch
++
++from vllm.config import VllmConfig
++from vllm.triton_utils import tl, triton
++from vllm.v1.worker.gpu.input_batch import InputBatch
++from vllm.v1.worker.gpu.spec_decode.suffix.speculator import (
++    _NUM_LEN_BUCKETS,
++    SuffixSpeculator,
++    _len_bucket,
++)
++
++if TYPE_CHECKING:
++    from collections.abc import Iterable
++
++    from vllm.v1.worker.gpu.states import RequestState
++
++_MIN_OBSERVATIONS = tl.constexpr(8)
++
++
++@triton.jit
++def _hybrid_route_publish_kernel(
++    num_valid_ptr,
++    match_lens_ptr,
++    sources_ptr,
++    model_drafts_ptr,
++    model_drafts_stride,
++    suffix_drafts_ptr,
++    suffix_drafts_stride,
++    model_stats_ptr,
++    suffix_stats_ptr,
++    structured_output_mask_ptr,
++    idx_mapping_ptr,
++    num_sampled_ptr,
++    route_index,
++    output_ptr,
++    output_stride,
++    last_use_suffix_ptr,
++    last_buckets_ptr,
++    last_valid_ptr,
++    MIN_MATCH: tl.constexpr,
++    K: tl.constexpr,
++    STATS_K: tl.constexpr,
++    K_PO2: tl.constexpr,
++    PREFIX: tl.constexpr,
++    QUALITY_GATE: tl.constexpr,
++    MIN_EXPECTED: tl.constexpr,
++    EXPLORATION_INTERVAL: tl.constexpr,
++):
++    b = tl.program_id(0)
++    k = tl.arange(0, K_PO2)
++    mask = k < K
++    source = tl.load(sources_ptr + b)
++    match_len = tl.load(match_lens_ptr + b)
++    bucket = source * _NUM_LEN_BUCKETS + _len_bucket(tl.maximum(match_len, 1))
++
++    suffix_stat = suffix_stats_ptr + (bucket * STATS_K + k) * 2
++    suffix_accepted = tl.load(suffix_stat, mask=mask, other=0).to(tl.float32)
++    suffix_observed = tl.load(suffix_stat + 1, mask=mask, other=0).to(tl.float32)
++    suffix_prob = (suffix_accepted + 1.0) / (suffix_observed + 2.0)
++
++    model_stat = model_stats_ptr + (bucket * STATS_K + k) * 2
++    model_accepted = tl.load(model_stat, mask=mask, other=0).to(tl.float32)
++    model_observed = tl.load(model_stat + 1, mask=mask, other=0).to(tl.float32)
++    model_prob = (model_accepted + 1.0) / (model_observed + 2.0)
++    model_survival = tl.cumprod(model_prob, axis=0)
++
++    prefix_survival = tl.sum(tl.where(k == PREFIX - 1, model_survival, 0.0), axis=0)
++    suffix_survival = prefix_survival * tl.cumprod(
++        tl.where(k < PREFIX, 1.0, suffix_prob), axis=0
++    )
++    splice_score = tl.sum(
++        tl.where(mask & (k < PREFIX), model_survival, 0.0), axis=0
++    ) + tl.sum(tl.where(mask & (k >= PREFIX), suffix_survival, 0.0), axis=0)
++    model_score = tl.sum(tl.where(mask, model_survival, 0.0), axis=0)
++    history_mature = (
++        tl.sum(tl.where(k == PREFIX, suffix_observed, 0.0), axis=0) >= _MIN_OBSERVATIONS
++    )
++    model_mature = (
++        tl.sum(tl.where(k == PREFIX, model_observed, 0.0), axis=0) >= _MIN_OBSERVATIONS
++    )
++    mature = history_mature & model_mature
++    better = splice_score > model_score
++    if QUALITY_GATE:
++        better = better & (splice_score >= MIN_EXPECTED)
++    select = (~history_mature) | (mature & better)
++    if EXPLORATION_INTERVAL > 0:
++        explore = mature & ((route_index + b) % EXPLORATION_INTERVAL == 0)
++        select = tl.where(explore, ~select, select)
++    required = K - PREFIX
++    prefix_valid = (
++        tl.sum(
++            (
++                tl.load(
++                    model_drafts_ptr + b * model_drafts_stride + k,
++                    mask=k < PREFIX,
++                    other=0,
++                )
++                < 0
++            ).to(tl.int32),
++            axis=0,
++        )
++        == 0
++    )
++    tail_mask = mask & (k >= PREFIX)
++    model_tail = tl.load(
++        model_drafts_ptr + b * model_drafts_stride + k,
++        mask=tail_mask,
++        other=-1,
++    )
++    suffix_tail = tl.load(
++        suffix_drafts_ptr + b * suffix_drafts_stride + k - PREFIX,
++        mask=tail_mask,
++        other=-2,
++    )
++    different_tail = (
++        tl.sum(
++            tl.where(tail_mask, model_tail != suffix_tail, 0).to(tl.int32),
++            axis=0,
++        )
++        > 0
++    )
++    select = select & different_tail
++
++    valid = (
++        (tl.load(num_valid_ptr + b) >= required)
++        & (match_len >= MIN_MATCH)
++        & prefix_valid
++    )
++    use_suffix = valid & select & ~tl.load(structured_output_mask_ptr + b)
++    req = tl.load(idx_mapping_ptr + b)
++    model = tl.load(model_drafts_ptr + b * model_drafts_stride + k, mask=mask, other=-1)
++    suffix_pos = k - PREFIX
++    suffix = tl.load(
++        suffix_drafts_ptr + b * suffix_drafts_stride + suffix_pos,
++        mask=mask & (suffix_pos >= 0),
++        other=-1,
++    )
++    take_suffix = use_suffix & (k >= PREFIX)
++    out = tl.where(take_suffix, suffix, model)
++    tl.store(output_ptr + b * output_stride + k, out, mask=mask)
++    tl.store(last_use_suffix_ptr + req, use_suffix)
++    has_candidate = (tl.load(num_valid_ptr + b) >= required) & (match_len >= MIN_MATCH)
++    tl.store(last_buckets_ptr + req, tl.where(has_candidate, bucket, -1))
++    tl.store(last_valid_ptr + req, tl.where(tl.load(num_sampled_ptr + b) > 0, K, 0))
++
++
++@triton.jit
++def _hybrid_observe_kernel(
++    idx_mapping_ptr,
++    structured_output_mask_ptr,
++    num_sampled_ptr,
++    num_rejected_ptr,
++    model_stats_ptr,
++    suffix_stats_ptr,
++    last_use_suffix_ptr,
++    last_buckets_ptr,
++    last_valid_ptr,
++    K: tl.constexpr,
++    K_PO2: tl.constexpr,
++    PREFIX: tl.constexpr,
++):
++    b = tl.program_id(0)
++    req = tl.load(idx_mapping_ptr + b)
++    if tl.load(structured_output_mask_ptr + b):
++        tl.store(last_valid_ptr + req, 0)
++        return
++    valid = tl.load(last_valid_ptr + req)
++    num_sampled = tl.load(num_sampled_ptr + b)
++    if (valid <= 0) | (num_sampled <= 0):
++        return
++    accepted_count = num_sampled - 1
++    verified = accepted_count + tl.load(num_rejected_ptr + b)
++    bucket = tl.load(last_buckets_ptr + req)
++    k = tl.arange(0, K_PO2)
++    observed = (k < K) & (k < valid) & (k <= accepted_count) & (k < verified)
++    accepted = k < accepted_count
++    use_suffix = tl.load(last_use_suffix_ptr + req)
++    model_stat = model_stats_ptr + (bucket * K + k) * 2
++    suffix_stat = suffix_stats_ptr + (bucket * K + k) * 2
++    valid_bucket = bucket >= 0
++    is_suffix = valid_bucket & use_suffix & (k >= PREFIX)
++    is_model = valid_bucket & ~is_suffix
++    tl.atomic_add(model_stat, accepted.to(tl.int64), mask=observed & is_model)
++    tl.atomic_add(model_stat + 1, 1, mask=observed & is_model)
++    tl.atomic_add(suffix_stat, accepted.to(tl.int64), mask=observed & is_suffix)
++    tl.atomic_add(suffix_stat + 1, 1, mask=observed & is_suffix)
++    tl.store(last_valid_ptr + req, 0)
++
++
++class SuffixSplice:
++    def __init__(
++        self,
++        vllm_config: VllmConfig,
++        device: torch.device,
++        req_states: "RequestState",
++    ):
++        self.device = device
++        self.suffix = SuffixSpeculator(vllm_config, device, req_states)
++        spec = vllm_config.speculative_config
++        assert spec is not None
++        self.prefix_len = spec.suffix_hybrid_prefix_length
++        self.min_match = spec.suffix_hybrid_min_match_length
++        self.min_expected = spec.suffix_hybrid_min_expected_accepted
++        self.stats_half_life = spec.suffix_hybrid_stats_half_life
++        self.exploration_interval = spec.suffix_hybrid_exploration_interval
++        self.max_num_reqs = self.suffix.max_num_reqs
++        self.num_speculative_steps = spec.num_speculative_tokens
++
++        shape = (2 * _NUM_LEN_BUCKETS, self.num_speculative_steps, 2)
++        self.suffix_stats = torch.zeros(shape, dtype=torch.int64, device=device)
++        self.model_stats = torch.zeros(
++            (2 * _NUM_LEN_BUCKETS, self.num_speculative_steps, 2),
++            dtype=torch.int64,
++            device=device,
++        )
++        self.last_use_suffix = torch.zeros(
++            self.max_num_reqs, dtype=torch.bool, device=device
++        )
++        self.last_buckets = torch.full(
++            (self.max_num_reqs,), -1, dtype=torch.int32, device=device
++        )
++        self.last_valid = torch.zeros(
++            self.max_num_reqs, dtype=torch.int32, device=device
++        )
++        self.structured_output_mask = torch.zeros(
++            self.max_num_reqs, dtype=torch.bool, device=device
++        )
++        self.output_drafts = torch.zeros(
++            (self.max_num_reqs, self.num_speculative_steps),
++            dtype=torch.int64,
++            device=device,
++        )
++        self.num_steps = 0
++
++    def add_request(self, req_index: int, new_req_data) -> None:
++        self.last_valid[req_index].fill_(0)
++        self.last_buckets[req_index].fill_(-1)
++        self.last_use_suffix[req_index].fill_(False)
++
++    def on_requests_finished_with_lengths(
++        self,
++        finished_req_ids: "Iterable[str]",
++        final_token_lengths: dict[str, int],
++    ) -> None:
++        self.suffix.on_requests_finished_with_lengths(
++            finished_req_ids, final_token_lengths
++        )
++
++    def reset_state(self) -> None:
++        self.suffix.reset_state()
++        self.model_stats.zero_()
++        self.suffix_stats.zero_()
++        self.last_use_suffix.zero_()
++        self.last_buckets.fill_(-1)
++        self.last_valid.zero_()
++        self.num_steps = 0
++
++    def prepare_propose(
++        self,
++        input_batch: InputBatch,
++        num_sampled: torch.Tensor,
++        num_rejected: torch.Tensor,
++    ) -> None:
++        num_reqs = input_batch.num_reqs
++        structured_mask = self.structured_output_mask[:num_reqs]
++        structured_mask.zero_()
++        if input_batch.has_structured_output_reqs:
++            structured_ids = input_batch.structured_output_req_ids
++            if structured_ids:
++                structured_mask.copy_(
++                    torch.tensor(
++                        [req_id in structured_ids for req_id in input_batch.req_ids],
++                        dtype=torch.bool,
++                        device=self.device,
++                    )
++                )
++            else:
++                structured_mask.fill_(True)
++            self.last_valid[input_batch.idx_mapping[structured_mask]] = 0
++        _hybrid_observe_kernel[(num_reqs,)](
++            input_batch.idx_mapping,
++            structured_mask,
++            num_sampled,
++            num_rejected,
++            self.model_stats,
++            self.suffix_stats,
++            self.last_use_suffix,
++            self.last_buckets,
++            self.last_valid,
++            K=self.num_speculative_steps,
++            K_PO2=triton.next_power_of_2(self.num_speculative_steps),
++            PREFIX=self.prefix_len,
++        )
++        self.num_steps += 1
++        if self.num_steps % self.stats_half_life == 0:
++            self.model_stats.bitwise_right_shift_(1)
++            self.suffix_stats.bitwise_right_shift_(1)
++
++    def _publish(
++        self,
++        input_batch: InputBatch,
++        model_drafts: torch.Tensor,
++        suffix_drafts: torch.Tensor,
++        num_sampled: torch.Tensor,
++        k: int,
++    ) -> torch.Tensor:
++        self.output_drafts[: input_batch.num_reqs, k:].fill_(-1)
++        _hybrid_route_publish_kernel[(input_batch.num_reqs,)](
++            self.suffix.num_valid,
++            self.suffix.match_lens,
++            self.suffix.sources,
++            model_drafts,
++            model_drafts.stride(0),
++            suffix_drafts,
++            suffix_drafts.stride(0),
++            self.model_stats,
++            self.suffix_stats,
++            self.structured_output_mask,
++            input_batch.idx_mapping,
++            num_sampled,
++            self.num_steps,
++            self.output_drafts,
++            self.output_drafts.stride(0),
++            self.last_use_suffix,
++            self.last_buckets,
++            self.last_valid,
++            MIN_MATCH=self.min_match,
++            K=k,
++            STATS_K=self.num_speculative_steps,
++            K_PO2=triton.next_power_of_2(k),
++            PREFIX=self.prefix_len,
++            QUALITY_GATE=self.min_expected is not None,
++            MIN_EXPECTED=self.min_expected or 0.0,
++            EXPLORATION_INTERVAL=self.exploration_interval,
++        )
++        return self.output_drafts[: input_batch.num_reqs]
++
++    def sync_drafts_metadata(self) -> None:
++        from vllm.distributed.parallel_state import get_pcp_group
++
++        pcp_group = get_pcp_group()
++        for tensor in (
++            self.last_use_suffix,
++            self.last_buckets,
++            self.last_valid,
++        ):
++            pcp_group.broadcast(tensor, src=0)
++
++    @torch.inference_mode()
++    def postprocess(
++        self,
++        model_drafts: torch.Tensor,
++        input_batch: InputBatch,
++        num_sampled: torch.Tensor,
++        last_sampled: torch.Tensor,
++        k: int,
++    ) -> torch.Tensor:
++        if k == 0:
++            self.last_valid[input_batch.idx_mapping] = 0
++            return model_drafts
++        if k <= self.prefix_len:
++            return self._publish(
++                input_batch, model_drafts, model_drafts, num_sampled, k
++            )
++        suffix_drafts = self.suffix.propose_hybrid(
++            input_batch,
++            num_sampled,
++            last_sampled,
++            k - self.prefix_len,
++            query_prefix=model_drafts,
++            prefix_len=self.prefix_len,
++        )
++        return self._publish(input_batch, model_drafts, suffix_drafts, num_sampled, k)
+diff --git a/vllm/v1/worker/gpu/spec_decode/suffix/config.py b/vllm/v1/worker/gpu/spec_decode/suffix/config.py
+index 5e6f016d25..94e049187e 100644
+--- a/vllm/v1/worker/gpu/spec_decode/suffix/config.py
++++ b/vllm/v1/worker/gpu/spec_decode/suffix/config.py
+@@ -11,6 +11,24 @@ if TYPE_CHECKING:
+ logger = init_logger(__name__)
+ 
+ 
++def validate_suffix_decoding_parameters(spec: "SpeculativeConfig") -> None:
++    if spec.suffix_decoding_max_tree_depth < 1:
++        raise ValueError(
++            f"suffix_decoding_max_tree_depth="
++            f"{spec.suffix_decoding_max_tree_depth} must be >= 1"
++        )
++    if not 0 <= spec.suffix_decoding_corpus_tokens < (1 << 31):
++        raise ValueError(
++            f"suffix_decoding_corpus_tokens="
++            f"{spec.suffix_decoding_corpus_tokens} must be in [0, 2**31)"
++        )
++    if spec.suffix_decoding_max_cached_requests < 0:
++        raise ValueError(
++            f"suffix_decoding_max_cached_requests="
++            f"{spec.suffix_decoding_max_cached_requests} must be >= 0"
++        )
++
++
+ class SuffixSpeculatorConfig(SpeculatorConfig):
+     base_method = "suffix"
+     speculator_class = (
+@@ -30,19 +48,4 @@ class SuffixSpeculatorConfig(SpeculatorConfig):
+                 "Defaulted num_speculative_tokens to %s for suffix decoding.",
+                 spec.num_speculative_tokens,
+             )
+-        # Validate values
+-        if spec.suffix_decoding_max_tree_depth < 1:
+-            raise ValueError(
+-                f"suffix_decoding_max_tree_depth="
+-                f"{spec.suffix_decoding_max_tree_depth} must be >= 1"
+-            )
+-        if not 0 <= spec.suffix_decoding_corpus_tokens < (1 << 31):
+-            raise ValueError(
+-                f"suffix_decoding_corpus_tokens="
+-                f"{spec.suffix_decoding_corpus_tokens} must be in [0, 2**31)"
+-            )
+-        if spec.suffix_decoding_max_cached_requests < 0:
+-            raise ValueError(
+-                f"suffix_decoding_max_cached_requests="
+-                f"{spec.suffix_decoding_max_cached_requests} must be >= 0"
+-            )
++        validate_suffix_decoding_parameters(spec)
+diff --git a/vllm/v1/worker/gpu/spec_decode/suffix/speculator.py b/vllm/v1/worker/gpu/spec_decode/suffix/speculator.py
+index 90ab284621..193a36b87f 100644
+--- a/vllm/v1/worker/gpu/spec_decode/suffix/speculator.py
++++ b/vllm/v1/worker/gpu/spec_decode/suffix/speculator.py
+@@ -79,7 +79,12 @@ def _suffix_local_scan_kernel(
+     num_sampled_ptr,  # *int32  [B]
+     scratch_ptr,  # *int64  [B, scratch_stride]  (output)
+     scratch_stride,
++    query_prefix_ptr,
++    query_prefix_stride,
+     Lp1,  # int64 packing radix (> any position)
++    QUERY_PREFIX: tl.constexpr,
++    REQUIRE_FULL: tl.constexpr,
++    K: tl.constexpr,
+     MAX_DEPTH: tl.constexpr,
+     BLOCK: tl.constexpr,
+ ):
+@@ -104,11 +109,23 @@ def _suffix_local_scan_kernel(
+ 
+     pos = blk * BLOCK + tl.arange(0, BLOCK).to(tl.int64)
+     active = (pos >= 1) & (pos < seq_len) & (num_sampled > 0)
++    if REQUIRE_FULL:
++        active = active & (pos + K <= seq_len)
+     match_len = tl.zeros([BLOCK], dtype=tl.int64)
+     for t in range(MAX_DEPTH):
+         # Request token t back from its end (newest first).
+-        tail_pos = seq_len - 1 - t
+-        tail_tok = tl.load(row + tail_pos, mask=tail_pos >= 0, other=-2)
++        tail_pos = seq_len + QUERY_PREFIX - 1 - t
++        from_prefix = tail_pos >= seq_len
++        tail_tok = tl.load(
++            query_prefix_ptr + b * query_prefix_stride + tail_pos - seq_len,
++            mask=from_prefix,
++            other=-2,
++        )
++        tail_tok = tl.where(
++            from_prefix,
++            tail_tok,
++            tl.load(row + tail_pos, mask=(~from_prefix) & (tail_pos >= 0), other=-2),
++        )
+         src_pos = pos - 1 - t
+         ok = active & (src_pos >= 0) & (tail_pos >= 0)
+         tok = tl.load(row + src_pos, mask=ok, other=-1)
+@@ -123,9 +140,15 @@ def _suffix_local_scan_kernel(
+ def _corpus_draft(
+     row,
+     seq_len,
++    batch_idx,
+     table_ptr,
+     corpus_ptr,
+     corpus_len,
++    query_prefix_ptr,
++    query_prefix_stride,
++    QUERY_PREFIX: tl.constexpr,
++    REQUIRE_FULL: tl.constexpr,
++    MIN_MATCH: tl.constexpr,
+     HASH_MUL: tl.constexpr,
+     NUM_BUCKETS: tl.constexpr,
+     SLOTS: tl.constexpr,
+@@ -149,14 +172,31 @@ def _corpus_draft(
+     d_iota = tl.arange(0, DEPTH_PO2).to(tl.int64)
+     k_iota = tl.arange(0, K_PO2).to(tl.int64)
+ 
+-    tail_pos = seq_len - 1 - d_iota
+-    tail = tl.load(
+-        row + tail_pos, mask=(d_iota < MAX_DEPTH) & (tail_pos >= 0), other=-2
++    tail_pos = seq_len + QUERY_PREFIX - 1 - d_iota
++    from_prefix = tail_pos >= seq_len
++    prefix_tail = tl.load(
++        query_prefix_ptr + batch_idx * query_prefix_stride + tail_pos - seq_len,
++        mask=from_prefix & (d_iota < MAX_DEPTH),
++        other=-2,
++    )
++    history_tail = tl.load(
++        row + tail_pos,
++        mask=(~from_prefix) & (d_iota < MAX_DEPTH) & (tail_pos >= 0),
++        other=-2,
+     )
++    tail = tl.where(from_prefix, prefix_tail, history_tail)
+     # Hash the trailing tokens newest-first, as ingestion does.
+     hv = tl.zeros((), tl.int64)
+     for d in tl.static_range(4):
+-        tok = tl.load(row + seq_len - 1 - d, mask=seq_len - 1 - d >= 0, other=0)
++        pos = seq_len + QUERY_PREFIX - 1 - d
++        use_prefix = pos >= seq_len
++        prefix_tok = tl.load(
++            query_prefix_ptr + batch_idx * query_prefix_stride + pos - seq_len,
++            mask=use_prefix,
++            other=0,
++        )
++        history_tok = tl.load(row + pos, mask=(~use_prefix) & (pos >= 0), other=0)
++        tok = tl.where(use_prefix, prefix_tok, history_tok)
+         hv = (hv ^ tok.to(tl.int64)) * HASH_MUL
+         if d == 1:
+             bucket2 = _bucket(hv, NUM_BUCKETS)
+@@ -178,7 +218,13 @@ def _corpus_draft(
+     miss = (src != tail[None, :]).to(tl.int32)
+     c_len = tl.sum((tl.cumsum(miss, axis=1) == 0).to(tl.int64), axis=1)
+     nxt = tl.load(corpus_ptr + cpos, mask=(vals >= 0) & (cpos < corpus_len), other=-1)
+-    ok = (vals >= 0) & (nxt >= 0) & (c_len >= key_len) & (seq_len >= key_len)
++    ok = (
++        (vals >= 0)
++        & (nxt >= 0)
++        & (c_len >= key_len)
++        & (c_len >= MIN_MATCH)
++        & (seq_len + QUERY_PREFIX >= key_len)
++    )
+     # Both buckets often hold the same position; count it once.
+     dup = (
+         (cpos[:, None] == cpos[None, :])
+@@ -195,6 +241,9 @@ def _corpus_draft(
+         other=-1,
+     ).to(tl.int64)
+     cont = tl.where(tl.cumsum((cont < 0).to(tl.int32), axis=1) == 0, cont, -1)
++    if REQUIRE_FULL:
++        full = tl.sum((cont >= 0).to(tl.int32), axis=1) == K
++        ok = ok & full
+ 
+     # Candidates sharing a match length draft identical chains; score each
+     # distinct length once.
+@@ -267,13 +316,21 @@ def _suffix_finalize_kernel(
+     corpus_len,
+     table_ptr,  # *int64  [2, NUM_BUCKETS, SLOTS]
+     drafts_ptr,  # *int64  [B, K]  (output)
++    drafts_stride,
+     num_valid_ptr,  # *int32  [B]  (output)
++    match_lens_ptr,  # *int32  [B]  (output)
++    sources_ptr,  # *int32  [B]  (output)
+     stats_ptr,  # *int64  [2 * _NUM_LEN_BUCKETS, K, 2]  (accepted, observed)
+     last_bucket_ptr,  # *int32  [max_num_reqs]  (output)
+     last_valid_ptr,  # *int32  [max_num_reqs]  (output)
+     conf_ptr,  # *fp32  [B, K]  (output)
++    query_prefix_ptr,
++    query_prefix_stride,
++    QUERY_PREFIX: tl.constexpr,
+     HAS_CORPUS: tl.constexpr,
+     ADAPTIVE: tl.constexpr,
++    REQUIRE_FULL: tl.constexpr,
++    MIN_MATCH: tl.constexpr,
+     HASH_MUL: tl.constexpr,
+     NUM_BUCKETS: tl.constexpr,
+     SLOTS: tl.constexpr,
+@@ -309,9 +366,15 @@ def _suffix_finalize_kernel(
+         g_len, g_draft, g_n = _corpus_draft(
+             row,
+             seq_len,
++            b,
+             table_ptr,
+             corpus_ptr,
+             corpus_len,
++            query_prefix_ptr,
++            query_prefix_stride,
++            QUERY_PREFIX,
++            REQUIRE_FULL,
++            MIN_MATCH,
+             HASH_MUL,
+             NUM_BUCKETS,
+             SLOTS,
+@@ -335,8 +398,10 @@ def _suffix_finalize_kernel(
+     # Invalid slots fall back to the last sampled token; they are verified as
+     # ordinary (rejectable) drafts, so the fill value only affects efficiency.
+     out = tl.where(draft_ok, draft, last_tok)
+-    tl.store(drafts_ptr + b * K + k_iota, out, mask=k_mask)
++    tl.store(drafts_ptr + b * drafts_stride + k_iota, out, mask=k_mask)
+     tl.store(num_valid_ptr + b, num_valid)
++    tl.store(match_lens_ptr + b, match_len)
++    tl.store(sources_ptr + b, source)
+ 
+     if ADAPTIVE:
+         # Per-position confidence for adaptive verification: the observed
+@@ -576,6 +641,10 @@ class SuffixSpeculator(BaseSpeculator):
+         self.num_valid = torch.zeros(
+             self.max_num_reqs, dtype=torch.int32, device=device
+         )
++        self.match_lens = torch.zeros(
++            self.max_num_reqs, dtype=torch.int32, device=device
++        )
++        self.sources = torch.zeros(self.max_num_reqs, dtype=torch.int32, device=device)
+ 
+         # Adaptive verification (optional): per-slot confidences from
+         # acceptance statistics learned online.
+@@ -625,6 +694,11 @@ class SuffixSpeculator(BaseSpeculator):
+         return None
+ 
+     def on_requests_finished(self, finished_req_ids: Iterable[str]) -> None:
++        self.on_requests_finished_with_lengths(finished_req_ids, {})
++
++    def on_requests_finished_with_lengths(
++        self, finished_req_ids: Iterable[str], final_token_lengths: dict[str, int]
++    ) -> None:
+         """Add finished responses to the corpus before their slots are freed."""
+         if not self.has_corpus:
+             return
+@@ -655,6 +729,13 @@ class SuffixSpeculator(BaseSpeculator):
+         self.num_docs += num_docs
+         docs_gpu = async_tensor_h2d(docs, self.device, torch.int32)
+         token_ids = self.req_states.all_token_ids.gpu
++        ingest_end = req_states.total_len.gpu
++        if final_token_lengths:
++            ingest_end = ingest_end.clone()
++            for req_id, final_len in final_token_lengths.items():
++                slot = req_states.req_id_to_index.get(req_id)
++                if slot is not None:
++                    ingest_end[slot] = final_len
+         _suffix_ingest_kernel[
+             (num_docs, triton.cdiv(self.max_model_len, _INGEST_BLOCK))
+         ](
+@@ -662,7 +743,7 @@ class SuffixSpeculator(BaseSpeculator):
+             token_ids.stride(0),
+             docs_gpu,
+             num_docs,
+-            req_states.total_len.gpu,
++            ingest_end,
+             self.corpus,
+             self.corpus_len,
+             self.corpus_head,
+@@ -679,6 +760,89 @@ class SuffixSpeculator(BaseSpeculator):
+         self.corpus_head.copy_(self.ingest_out[0:1])
+         self.doc_seq.copy_(self.ingest_out[1:2])
+ 
++    def _num_scan_blocks(self, input_batch: InputBatch, prefix_len: int) -> int:
++        max_history_len = int(
++            input_batch.seq_lens_cpu_upper_bound[: input_batch.num_reqs].max().item()
++        )
++        active_len = min(self.max_model_len, max_history_len + prefix_len)
++        return triton.cdiv(max(active_len, 1), self.block_l)
++
++    def _query(
++        self,
++        input_batch: InputBatch,
++        num_sampled: torch.Tensor,
++        last_sampled: torch.Tensor,
++        num_tokens: int,
++        query_prefix: torch.Tensor,
++        prefix_len: int,
++        require_full: bool,
++        min_match: int,
++        adaptive: bool,
++    ) -> torch.Tensor:
++        token_ids = self.req_states.all_token_ids.gpu
++        total_len = self.req_states.total_len.gpu
++        idx_mapping = input_batch.idx_mapping
++        num_scan_blocks = self._num_scan_blocks(input_batch, prefix_len)
++        _suffix_local_scan_kernel[(input_batch.num_reqs, num_scan_blocks)](
++            token_ids,
++            token_ids.stride(0),
++            idx_mapping,
++            total_len,
++            num_sampled,
++            self.scratch,
++            self.scratch.stride(0),
++            query_prefix,
++            query_prefix.stride(0),
++            self.max_model_len + 1,
++            QUERY_PREFIX=prefix_len,
++            REQUIRE_FULL=require_full,
++            K=num_tokens,
++            MAX_DEPTH=self.max_depth,
++            BLOCK=self.block_l,
++            num_warps=4,
++        )
++        _suffix_finalize_kernel[(input_batch.num_reqs,)](
++            token_ids,
++            token_ids.stride(0),
++            idx_mapping,
++            total_len,
++            num_sampled,
++            last_sampled.view(-1),
++            self.scratch,
++            self.scratch.stride(0),
++            self.n_blocks,
++            self.max_model_len + 1,
++            self.corpus,
++            self.corpus.shape[0],
++            self.table,
++            self.drafts,
++            self.drafts.stride(0),
++            self.num_valid,
++            self.match_lens,
++            self.sources,
++            self.accept_stats,
++            self.last_bucket,
++            self.last_valid,
++            self.draft_token_confidence_probs,
++            query_prefix,
++            query_prefix.stride(0),
++            QUERY_PREFIX=prefix_len,
++            HAS_CORPUS=self.has_corpus,
++            ADAPTIVE=adaptive,
++            REQUIRE_FULL=require_full,
++            MIN_MATCH=min_match,
++            HASH_MUL=_HASH_MUL,
++            NUM_BUCKETS=self.num_buckets,
++            SLOTS=_BUCKET_SLOTS,
++            MAX_DEPTH=self.max_depth,
++            DEPTH_PO2=triton.next_power_of_2(self.max_depth),
++            K=num_tokens,
++            K_PO2=max(1, triton.next_power_of_2(num_tokens)),
++            NB_PO2=max(1, triton.next_power_of_2(num_scan_blocks)),
++            num_warps=4,
++        )
++        return self.drafts[: input_batch.num_reqs]
++
+     @torch.inference_mode()
+     def propose(
+         self,
+@@ -704,8 +868,6 @@ class SuffixSpeculator(BaseSpeculator):
+         if dummy_run:
+             return self.drafts[:num_reqs]
+ 
+-        token_ids = self.req_states.all_token_ids.gpu
+-        total_len = self.req_states.total_len.gpu
+         idx_mapping = input_batch.idx_mapping
+         k_po2 = max(1, triton.next_power_of_2(self.num_speculative_steps))
+ 
+@@ -729,49 +891,38 @@ class SuffixSpeculator(BaseSpeculator):
+             if self.num_steps % _STATS_HALF_LIFE == 0:
+                 self.accept_stats.bitwise_right_shift_(1)
+ 
+-        _suffix_local_scan_kernel[(num_reqs, self.n_blocks)](
+-            token_ids,
+-            token_ids.stride(0),
+-            idx_mapping,
+-            total_len,
++        return self._query(
++            input_batch,
+             num_sampled,
+-            self.scratch,
+-            self.scratch.stride(0),
+-            self.max_model_len + 1,
+-            MAX_DEPTH=self.max_depth,
+-            BLOCK=self.block_l,
+-            num_warps=4,
++            last_sampled,
++            self.num_speculative_steps,
++            self.drafts,
++            prefix_len=0,
++            require_full=False,
++            min_match=1,
++            adaptive=self.enable_adaptive_verification,
+         )
+-        _suffix_finalize_kernel[(num_reqs,)](
+-            token_ids,
+-            token_ids.stride(0),
+-            idx_mapping,
+-            total_len,
++
++    def propose_hybrid(
++        self,
++        input_batch: InputBatch,
++        num_sampled: torch.Tensor,
++        last_sampled: torch.Tensor,
++        num_tokens: int,
++        query_prefix: torch.Tensor,
++        prefix_len: int,
++    ) -> torch.Tensor:
++        spec = self.vllm_config.speculative_config
++        assert spec is not None
++        drafts = self._query(
++            input_batch,
+             num_sampled,
+-            last_sampled.view(-1),
+-            self.scratch,
+-            self.scratch.stride(0),
+-            self.n_blocks,
+-            self.max_model_len + 1,
+-            self.corpus,
+-            self.corpus.shape[0],
+-            self.table,
+-            self.drafts,
+-            self.num_valid,
+-            self.accept_stats,
+-            self.last_bucket,
+-            self.last_valid,
+-            self.draft_token_confidence_probs,
+-            HAS_CORPUS=self.has_corpus,
+-            ADAPTIVE=self.enable_adaptive_verification,
+-            HASH_MUL=_HASH_MUL,
+-            NUM_BUCKETS=self.num_buckets,
+-            SLOTS=_BUCKET_SLOTS,
+-            MAX_DEPTH=self.max_depth,
+-            DEPTH_PO2=triton.next_power_of_2(self.max_depth),
+-            K=self.num_speculative_steps,
+-            K_PO2=k_po2,
+-            NB_PO2=max(1, triton.next_power_of_2(self.n_blocks)),
+-            num_warps=4,
++            last_sampled,
++            num_tokens,
++            query_prefix,
++            prefix_len,
++            require_full=True,
++            min_match=spec.suffix_hybrid_min_match_length,
++            adaptive=False,
+         )
+-        return self.drafts[:num_reqs]
++        return drafts[:, :num_tokens]
+diff --git a/vllm/v1/worker/gpu/warmup.py b/vllm/v1/worker/gpu/warmup.py
+index 94f85b0e09..4096699353 100644
+--- a/vllm/v1/worker/gpu/warmup.py
++++ b/vllm/v1/worker/gpu/warmup.py
+@@ -792,6 +792,8 @@ def _warmup_kernels(
+     if model_runner.speculator is not None:
+         # Reset state for drafters that learn across requests.
+         model_runner.speculator.reset_state()
++    if model_runner.splice is not None:
++        model_runner.splice.reset_state()
+     model_runner.kv_connector.set_disabled(False)
+     if model_runner.kv_block_zeroer is not None:
+         model_runner.kv_block_zeroer.zero_block_ids([0])

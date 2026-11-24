@@ -1,0 +1,158 @@
+{
+  "blazedit": {
+    "selected_j": 1,
+    "candidates": {
+      "1": {
+        "tokens_per_second": 611.5280048953855,
+        "accepted_per_draft": 4.019520130134201,
+        "suffix_observed": 5244,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j1_r1.json"
+      },
+      "2": {
+        "tokens_per_second": 591.5012357581965,
+        "accepted_per_draft": 3.7178407350689127,
+        "suffix_observed": 1721,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j2_r1.json"
+      },
+      "4": {
+        "tokens_per_second": 560.2338008474901,
+        "accepted_per_draft": 3.4396396396396396,
+        "suffix_observed": 956,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j4_r1.json"
+      }
+    },
+    "pure_tokens_per_second": 521.2151663408533,
+    "selected_gain": 0.1732736197769642,
+    "tie_percent": 3.0
+  },
+  "speed_coding": {
+    "selected_j": 1,
+    "candidates": {
+      "1": {
+        "tokens_per_second": 577.2583950614935,
+        "accepted_per_draft": 2.1076326002587322,
+        "suffix_observed": 402,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j1_r1.json"
+      },
+      "2": {
+        "tokens_per_second": 572.6113414795667,
+        "accepted_per_draft": 2.138816134101624,
+        "suffix_observed": 532,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j2_r1.json"
+      },
+      "4": {
+        "tokens_per_second": 580.2470452989062,
+        "accepted_per_draft": 2.1251626333593547,
+        "suffix_observed": 244,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j4_r1.json"
+      }
+    },
+    "pure_tokens_per_second": 552.7822808992958,
+    "selected_gain": 0.04427803677494646,
+    "tie_percent": 3.0
+  },
+  "speed_rag": {
+    "selected_j": 1,
+    "candidates": {
+      "1": {
+        "tokens_per_second": 378.9875618502348,
+        "accepted_per_draft": 2.1655277145026575,
+        "suffix_observed": 824,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j1_r1.json"
+      },
+      "2": {
+        "tokens_per_second": 373.9056343547867,
+        "accepted_per_draft": 2.0204379562043795,
+        "suffix_observed": 633,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j2_r1.json"
+      },
+      "4": {
+        "tokens_per_second": 376.4612821989527,
+        "accepted_per_draft": 1.7838494231936854,
+        "suffix_observed": 261,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j4_r1.json"
+      }
+    },
+    "pure_tokens_per_second": 353.6122210953583,
+    "selected_gain": 0.07176036132538965,
+    "tie_percent": 3.0
+  },
+  "speed_writing": {
+    "selected_j": 1,
+    "candidates": {
+      "1": {
+        "tokens_per_second": 350.1929185054666,
+        "accepted_per_draft": 1.0517271307064746,
+        "suffix_observed": 490,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j1_r1.json"
+      },
+      "2": {
+        "tokens_per_second": 331.7757703470811,
+        "accepted_per_draft": 0.9475074281941235,
+        "suffix_observed": 306,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j2_r1.json"
+      },
+      "4": {
+        "tokens_per_second": 332.8375316844486,
+        "accepted_per_draft": 0.993926100894213,
+        "suffix_observed": 111,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j4_r1.json"
+      }
+    },
+    "pure_tokens_per_second": 335.46321773968293,
+    "selected_gain": 0.04390854194099392,
+    "tie_percent": 3.0
+  },
+  "spec_rag": {
+    "selected_j": 1,
+    "candidates": {
+      "1": {
+        "tokens_per_second": 364.2311422217005,
+        "accepted_per_draft": 1.9625066952329941,
+        "suffix_observed": 754,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j1_r1.json"
+      },
+      "2": {
+        "tokens_per_second": 373.8812847952638,
+        "accepted_per_draft": 1.9436469962785752,
+        "suffix_observed": 489,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j2_r1.json"
+      },
+      "4": {
+        "tokens_per_second": 370.8279241221764,
+        "accepted_per_draft": 1.9077590884427564,
+        "suffix_observed": 337,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j4_r1.json"
+      }
+    },
+    "pure_tokens_per_second": 384.0010979737774,
+    "selected_gain": -0.05148411256216501,
+    "tie_percent": 3.0
+  },
+  "spec_summarization": {
+    "selected_j": 1,
+    "candidates": {
+      "1": {
+        "tokens_per_second": 359.37824092621565,
+        "accepted_per_draft": 1.365208545269583,
+        "suffix_observed": 742,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j1_r1.json"
+      },
+      "2": {
+        "tokens_per_second": 363.58453748773564,
+        "accepted_per_draft": 1.36132711249352,
+        "suffix_observed": 570,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j2_r1.json"
+      },
+      "4": {
+        "tokens_per_second": 358.2941577937872,
+        "accepted_per_draft": 1.3498475609756098,
+        "suffix_observed": 248,
+        "source": "/root/qwen35-9b-deploy/results/local_dflash2_k7_j4_r1.json"
+      }
+    },
+    "pure_tokens_per_second": 361.376365289339,
+    "selected_gain": -0.00552920598867479,
+    "tie_percent": 3.0
+  }
+}
