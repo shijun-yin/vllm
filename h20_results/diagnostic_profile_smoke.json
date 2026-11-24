@@ -1,0 +1,120 @@
+{
+  "family": "dflash",
+  "mode": "splice",
+  "model": "/root/qwen35-9b-deploy/models/Qwen3-4B-FP8",
+  "target_revision": null,
+  "draft_revision": null,
+  "draft_model": "/root/qwen35-9b-deploy/models/Qwen3-4B-DFlash-b16",
+  "temperature": 0.8,
+  "top_p": 1.0,
+  "top_k": -1,
+  "ignore_eos": false,
+  "max_tokens": 32,
+  "prefix_len": 1,
+  "corpus_tokens": 65536,
+  "corpus_key_mode": "dual",
+  "batch_size": 1,
+  "max_model_len": 3072,
+  "gpu_memory_utilization": 0.98,
+  "num_speculative_tokens": 15,
+  "profile_stages": true,
+  "results": {
+    "blazedit": {
+      "ids": [
+        "blazedit-2"
+      ],
+      "prompt_tokens": [
+        1379
+      ],
+      "waves": [
+        {
+          "wave": "cold",
+          "seconds": 0.5486978879999924,
+          "output_tokens": 32,
+          "output_tokens_per_second": 58.319889140889934,
+          "token_counts": [
+            32
+          ],
+          "finish_reasons": {
+            "length": 1
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 34,
+            "vllm:spec_decode_num_draft_tokens": 45,
+            "vllm:spec_decode_num_drafts": 3
+          },
+          "accepted_per_draft": 11.333333333333334,
+          "draft_token_acceptance": 0.7555555555555555,
+          "stage_profile": {
+            "execute_model": {
+              "calls": 7,
+              "device_ms": 395.37301674485207,
+              "host_ms": 68.52076299995247,
+              "programs": 0
+            },
+            "observe": {
+              "calls": 6,
+              "device_ms": 0.07798399962484837,
+              "host_ms": 0.4175179999776901,
+              "programs": 6
+            },
+            "splice_prepare": {
+              "calls": 6,
+              "device_ms": 0.29999999795109034,
+              "host_ms": 0.9613729999387033,
+              "programs": 0
+            },
+            "native_propose": {
+              "calls": 6,
+              "device_ms": 26.096352100372314,
+              "host_ms": 2.984480999970174,
+              "programs": 0
+            },
+            "splice_postprocess": {
+              "calls": 6,
+              "device_ms": 0.8838719800114632,
+              "host_ms": 270.64248399997837,
+              "programs": 0
+            },
+            "local_scan": {
+              "calls": 5,
+              "device_ms": 0.0307200001552701,
+              "host_ms": 0.3784960000245974,
+              "programs": 30
+            },
+            "corpus_finalize": {
+              "calls": 5,
+              "device_ms": 0.018432000186294317,
+              "host_ms": 0.4236880000405563,
+              "programs": 5
+            },
+            "route_publish": {
+              "calls": 5,
+              "device_ms": 0.02047999994829297,
+              "host_ms": 0.4331170000000384,
+              "programs": 5
+            },
+            "ingest": {
+              "calls": 1,
+              "device_ms": 0.009983999654650688,
+              "host_ms": 0.14150199999107826,
+              "programs": 3
+            },
+            "splice_finish_host": {
+              "calls": 1,
+              "device_ms": 0.2877439856529236,
+              "host_ms": 21.448888999998417,
+              "programs": 0
+            }
+          }
+        }
+      ],
+      "hybrid_stats": {
+        "model_accepted": 3,
+        "model_observed": 3,
+        "suffix_accepted": 42,
+        "suffix_observed": 42
+      }
+    }
+  }
+}

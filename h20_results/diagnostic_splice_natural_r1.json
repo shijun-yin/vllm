@@ -1,0 +1,1031 @@
+{
+  "family": "dflash",
+  "mode": "splice",
+  "model": "/root/qwen35-9b-deploy/models/Qwen3-4B-FP8",
+  "target_revision": null,
+  "draft_revision": null,
+  "draft_model": "/root/qwen35-9b-deploy/models/Qwen3-4B-DFlash-b16",
+  "temperature": 0.8,
+  "top_p": 1.0,
+  "top_k": -1,
+  "ignore_eos": false,
+  "max_tokens": 384,
+  "prefix_len": 1,
+  "corpus_tokens": 65536,
+  "corpus_key_mode": "dual",
+  "batch_size": 4,
+  "max_model_len": 3072,
+  "gpu_memory_utilization": 0.98,
+  "num_speculative_tokens": 15,
+  "profile_stages": true,
+  "results": {
+    "blazedit": {
+      "ids": [
+        "blazedit-2",
+        "blazedit-7",
+        "blazedit-8",
+        "blazedit-11",
+        "blazedit-18",
+        "blazedit-21",
+        "blazedit-30",
+        "blazedit-32",
+        "blazedit-35",
+        "blazedit-36",
+        "blazedit-42",
+        "blazedit-45",
+        "blazedit-47",
+        "blazedit-53",
+        "blazedit-69",
+        "blazedit-74"
+      ],
+      "prompt_tokens": [
+        1379,
+        1064,
+        1118,
+        1751,
+        1138,
+        1409,
+        1295,
+        1146,
+        1149,
+        1428,
+        1211,
+        1082,
+        1383,
+        1319,
+        1557,
+        1341
+      ],
+      "waves": [
+        {
+          "wave": "cold",
+          "seconds": 8.397672302999979,
+          "output_tokens": 6144,
+          "output_tokens_per_second": 731.6313114296114,
+          "token_counts": [
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384
+          ],
+          "finish_reasons": {
+            "length": 16
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 5439,
+            "vllm:spec_decode_num_draft_tokens": 11760,
+            "vllm:spec_decode_num_drafts": 784
+          },
+          "accepted_per_draft": 6.9375,
+          "draft_token_acceptance": 0.4625,
+          "stage_profile": {
+            "execute_model": {
+              "calls": 231,
+              "device_ms": 6578.84166187048,
+              "host_ms": 1331.5693179999926,
+              "programs": 0
+            },
+            "observe": {
+              "calls": 230,
+              "device_ms": 1.6508479877375066,
+              "host_ms": 16.12201899996535,
+              "programs": 832
+            },
+            "splice_prepare": {
+              "calls": 230,
+              "device_ms": 9.734784042928368,
+              "host_ms": 35.98099800063892,
+              "programs": 0
+            },
+            "native_propose": {
+              "calls": 230,
+              "device_ms": 1279.441026687622,
+              "host_ms": 85.93547199984641,
+              "programs": 0
+            },
+            "splice_postprocess": {
+              "calls": 230,
+              "device_ms": 18.687040075659752,
+              "host_ms": 791.2392040000213,
+              "programs": 0
+            },
+            "local_scan": {
+              "calls": 229,
+              "device_ms": 1.6199680166319013,
+              "host_ms": 17.366460000062034,
+              "programs": 6052
+            },
+            "corpus_finalize": {
+              "calls": 229,
+              "device_ms": 3.0420480100438,
+              "host_ms": 484.05585500051984,
+              "programs": 831
+            },
+            "route_publish": {
+              "calls": 229,
+              "device_ms": 1.4706239926163107,
+              "host_ms": 68.78671600020425,
+              "programs": 831
+            },
+            "ingest": {
+              "calls": 16,
+              "device_ms": 1.5387520091608167,
+              "host_ms": 3.012825000155317,
+              "programs": 48
+            },
+            "splice_finish_host": {
+              "calls": 16,
+              "device_ms": 6.236704051494598,
+              "host_ms": 466.2172330000658,
+              "programs": 0
+            }
+          }
+        },
+        {
+          "wave": "hot-1",
+          "seconds": 7.421827728999972,
+          "output_tokens": 6144,
+          "output_tokens_per_second": 827.8284304542665,
+          "token_counts": [
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384
+          ],
+          "finish_reasons": {
+            "length": 16
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 5573,
+            "vllm:spec_decode_num_draft_tokens": 9660,
+            "vllm:spec_decode_num_drafts": 644
+          },
+          "accepted_per_draft": 8.653726708074535,
+          "draft_token_acceptance": 0.5769151138716356,
+          "stage_profile": {
+            "execute_model": {
+              "calls": 192,
+              "device_ms": 5866.284079134464,
+              "host_ms": 1351.6464149998342,
+              "programs": 0
+            },
+            "observe": {
+              "calls": 191,
+              "device_ms": 1.411295996978879,
+              "host_ms": 13.36690999937673,
+              "programs": 692
+            },
+            "splice_prepare": {
+              "calls": 191,
+              "device_ms": 7.943807986564934,
+              "host_ms": 29.46008199978678,
+              "programs": 0
+            },
+            "native_propose": {
+              "calls": 191,
+              "device_ms": 1070.2172782421112,
+              "host_ms": 73.95691800024906,
+              "programs": 0
+            },
+            "splice_postprocess": {
+              "calls": 191,
+              "device_ms": 13.628704104572535,
+              "host_ms": 198.32149600011917,
+              "programs": 0
+            },
+            "local_scan": {
+              "calls": 190,
+              "device_ms": 1.604896018281579,
+              "host_ms": 14.400850000185983,
+              "programs": 5019
+            },
+            "corpus_finalize": {
+              "calls": 190,
+              "device_ms": 1.435808012727648,
+              "host_ms": 18.92754800064722,
+              "programs": 691
+            },
+            "route_publish": {
+              "calls": 190,
+              "device_ms": 0.7420160006731749,
+              "host_ms": 14.905920000046535,
+              "programs": 691
+            },
+            "ingest": {
+              "calls": 16,
+              "device_ms": 2.1736960224807262,
+              "host_ms": 3.534582000042974,
+              "programs": 48
+            },
+            "splice_finish_host": {
+              "calls": 16,
+              "device_ms": 7.022464007139206,
+              "host_ms": 579.3612020002001,
+              "programs": 0
+            }
+          }
+        },
+        {
+          "wave": "hot-2",
+          "seconds": 7.203401435999979,
+          "output_tokens": 6144,
+          "output_tokens_per_second": 852.9303905366878,
+          "token_counts": [
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384
+          ],
+          "finish_reasons": {
+            "length": 16
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 5590,
+            "vllm:spec_decode_num_draft_tokens": 9405,
+            "vllm:spec_decode_num_drafts": 627
+          },
+          "accepted_per_draft": 8.915470494417862,
+          "draft_token_acceptance": 0.5943646996278575,
+          "stage_profile": {
+            "execute_model": {
+              "calls": 189,
+              "device_ms": 5804.358828425407,
+              "host_ms": 1271.9613799996523,
+              "programs": 0
+            },
+            "observe": {
+              "calls": 188,
+              "device_ms": 1.2568319905549288,
+              "host_ms": 12.894793000157279,
+              "programs": 675
+            },
+            "splice_prepare": {
+              "calls": 188,
+              "device_ms": 6.861279987730086,
+              "host_ms": 28.402097000480353,
+              "programs": 0
+            },
+            "native_propose": {
+              "calls": 188,
+              "device_ms": 1052.1554889678955,
+              "host_ms": 71.37785199967084,
+              "programs": 0
+            },
+            "splice_postprocess": {
+              "calls": 188,
+              "device_ms": 13.306112047284842,
+              "host_ms": 193.6279989997729,
+              "programs": 0
+            },
+            "local_scan": {
+              "calls": 187,
+              "device_ms": 1.3549440149217844,
+              "host_ms": 14.491478999730134,
+              "programs": 4890
+            },
+            "corpus_finalize": {
+              "calls": 187,
+              "device_ms": 1.5836160082835704,
+              "host_ms": 19.283130000474102,
+              "programs": 674
+            },
+            "route_publish": {
+              "calls": 187,
+              "device_ms": 0.7187200000043958,
+              "host_ms": 13.898930000436849,
+              "programs": 674
+            },
+            "ingest": {
+              "calls": 14,
+              "device_ms": 1.6631039753556252,
+              "host_ms": 2.6596220001806614,
+              "programs": 48
+            },
+            "splice_finish_host": {
+              "calls": 14,
+              "device_ms": 6.58208005130291,
+              "host_ms": 520.4371839999453,
+              "programs": 0
+            }
+          }
+        }
+      ],
+      "hybrid_stats": {
+        "model_accepted": 11991,
+        "model_observed": 13000,
+        "suffix_accepted": 3320,
+        "suffix_observed": 3426
+      }
+    },
+    "speed_coding": {
+      "ids": [
+        "ecf92ab7acf1492da70e68fcddd9d0b7",
+        "5ace1d46a306452da3c517a7a8bc2093",
+        "709706096071415b9f3bd1d558693d1f",
+        "182e7a241cd64f309a013f89f2dde604",
+        "326e163b8bc24f74abf125254d60051b",
+        "4ca88202f05d4923b0fa2dcb3b6b637a",
+        "6be05541db3a4c8f8e82169353ed6aa2",
+        "73c564f6e702456fa85e903de4824d3c",
+        "76dfa9e332124de5a5403fcf51e61050",
+        "22f088e74c284523b965617fa401840a",
+        "126235195ce847b09b1dab1507421e64",
+        "c49bd7aa449844da8c67a1bb6797314e",
+        "68a3c3535f404350a2ece3e8c62211b5",
+        "f2bf4c564d0d42a39241e98a4e6c493f",
+        "22f2c7dc2f7745e2857160543c2cf401",
+        "0daf539b787c4dccbb547330a8b4c3d7"
+      ],
+      "prompt_tokens": [
+        402,
+        40,
+        114,
+        174,
+        285,
+        106,
+        86,
+        30,
+        124,
+        221,
+        139,
+        276,
+        134,
+        169,
+        179,
+        56
+      ],
+      "waves": [
+        {
+          "wave": "cold",
+          "seconds": 8.108725555999968,
+          "output_tokens": 6054,
+          "output_tokens_per_second": 746.6031447470071,
+          "token_counts": [
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            376,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            379,
+            307
+          ],
+          "finish_reasons": {
+            "length": 13,
+            "stop": 3
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 4981,
+            "vllm:spec_decode_num_draft_tokens": 16830,
+            "vllm:spec_decode_num_drafts": 1122
+          },
+          "accepted_per_draft": 4.4393939393939394,
+          "draft_token_acceptance": 0.295959595959596,
+          "stage_profile": {
+            "execute_model": {
+              "calls": 308,
+              "device_ms": 4313.604445964098,
+              "host_ms": 978.0030039996745,
+              "programs": 0
+            },
+            "observe": {
+              "calls": 307,
+              "device_ms": 1.6320639965124428,
+              "host_ms": 21.534933000054934,
+              "programs": 1154
+            },
+            "splice_prepare": {
+              "calls": 307,
+              "device_ms": 9.383456019219011,
+              "host_ms": 47.253862000047775,
+              "programs": 0
+            },
+            "native_propose": {
+              "calls": 307,
+              "device_ms": 2344.5653972625732,
+              "host_ms": 909.131610999566,
+              "programs": 0
+            },
+            "local_scan": {
+              "calls": 307,
+              "device_ms": 1.690623995848,
+              "host_ms": 23.07626100082416,
+              "programs": 2918
+            },
+            "corpus_finalize": {
+              "calls": 307,
+              "device_ms": 843.9717185415793,
+              "host_ms": 980.2481420003915,
+              "programs": 1154
+            },
+            "route_publish": {
+              "calls": 307,
+              "device_ms": 1.694080002605915,
+              "host_ms": 23.35804700027211,
+              "programs": 1154
+            },
+            "splice_postprocess": {
+              "calls": 307,
+              "device_ms": 863.2870321646333,
+              "host_ms": 1065.1996649992839,
+              "programs": 0
+            },
+            "ingest": {
+              "calls": 16,
+              "device_ms": 1.710079993121326,
+              "host_ms": 2.695038000013028,
+              "programs": 48
+            },
+            "splice_finish_host": {
+              "calls": 16,
+              "device_ms": 6.003807961940765,
+              "host_ms": 390.6726209999647,
+              "programs": 0
+            }
+          }
+        },
+        {
+          "wave": "hot-1",
+          "seconds": 6.291498409999974,
+          "output_tokens": 6041,
+          "output_tokens_per_second": 960.1846184047632,
+          "token_counts": [
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            361,
+            304
+          ],
+          "finish_reasons": {
+            "length": 14,
+            "stop": 2
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 5005,
+            "vllm:spec_decode_num_draft_tokens": 16275,
+            "vllm:spec_decode_num_drafts": 1085
+          },
+          "accepted_per_draft": 4.612903225806452,
+          "draft_token_acceptance": 0.30752688172043013,
+          "stage_profile": {
+            "execute_model": {
+              "calls": 299,
+              "device_ms": 4184.878664314747,
+              "host_ms": 923.8245879998317,
+              "programs": 0
+            },
+            "observe": {
+              "calls": 298,
+              "device_ms": 1.9663359820842743,
+              "host_ms": 20.132840000201213,
+              "programs": 1115
+            },
+            "splice_prepare": {
+              "calls": 298,
+              "device_ms": 9.629567997995764,
+              "host_ms": 45.23150900007522,
+              "programs": 0
+            },
+            "native_propose": {
+              "calls": 298,
+              "device_ms": 1469.5122861862183,
+              "host_ms": 85.28150299997606,
+              "programs": 0
+            },
+            "local_scan": {
+              "calls": 298,
+              "device_ms": 1.6465919939801097,
+              "host_ms": 20.37310799971692,
+              "programs": 2826
+            },
+            "corpus_finalize": {
+              "calls": 298,
+              "device_ms": 3.557024004869163,
+              "host_ms": 71.69894199967075,
+              "programs": 1115
+            },
+            "route_publish": {
+              "calls": 298,
+              "device_ms": 1.247903999639675,
+              "host_ms": 20.994802999950934,
+              "programs": 1115
+            },
+            "splice_postprocess": {
+              "calls": 298,
+              "device_ms": 21.795648092404008,
+              "host_ms": 147.48904400016727,
+              "programs": 0
+            },
+            "ingest": {
+              "calls": 15,
+              "device_ms": 1.4697280190885067,
+              "host_ms": 2.5253379999981007,
+              "programs": 48
+            },
+            "splice_finish_host": {
+              "calls": 15,
+              "device_ms": 5.851519957184792,
+              "host_ms": 372.2640399999477,
+              "programs": 0
+            }
+          }
+        },
+        {
+          "wave": "hot-2",
+          "seconds": 6.005999589999988,
+          "output_tokens": 6029,
+          "output_tokens_per_second": 1003.8295723560002,
+          "token_counts": [
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            360,
+            384,
+            384,
+            384,
+            384,
+            384,
+            384,
+            378,
+            299
+          ],
+          "finish_reasons": {
+            "length": 13,
+            "stop": 3
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 5022,
+            "vllm:spec_decode_num_draft_tokens": 15465,
+            "vllm:spec_decode_num_drafts": 1031
+          },
+          "accepted_per_draft": 4.870999030067895,
+          "draft_token_acceptance": 0.324733268671193,
+          "stage_profile": {
+            "execute_model": {
+              "calls": 291,
+              "device_ms": 4053.8084433972836,
+              "host_ms": 919.5576820005158,
+              "programs": 0
+            },
+            "observe": {
+              "calls": 290,
+              "device_ms": 2.0363519901875407,
+              "host_ms": 20.029146000013043,
+              "programs": 1061
+            },
+            "splice_prepare": {
+              "calls": 290,
+              "device_ms": 9.278207990340889,
+              "host_ms": 42.97184199975845,
+              "programs": 0
+            },
+            "native_propose": {
+              "calls": 290,
+              "device_ms": 1425.8597106933594,
+              "host_ms": 81.39718599994694,
+              "programs": 0
+            },
+            "local_scan": {
+              "calls": 290,
+              "device_ms": 1.5978559972718358,
+              "host_ms": 20.516622999650735,
+              "programs": 2704
+            },
+            "corpus_finalize": {
+              "calls": 290,
+              "device_ms": 2.8437440074048936,
+              "host_ms": 23.92052600032457,
+              "programs": 1061
+            },
+            "route_publish": {
+              "calls": 290,
+              "device_ms": 1.1367360011208802,
+              "host_ms": 20.77855499976522,
+              "programs": 1061
+            },
+            "splice_postprocess": {
+              "calls": 290,
+              "device_ms": 20.01257615722716,
+              "host_ms": 98.67867399981378,
+              "programs": 0
+            },
+            "ingest": {
+              "calls": 16,
+              "device_ms": 1.7781120063737035,
+              "host_ms": 2.910422999889306,
+              "programs": 48
+            },
+            "splice_finish_host": {
+              "calls": 16,
+              "device_ms": 6.305599957704544,
+              "host_ms": 374.5233440001243,
+              "programs": 0
+            }
+          }
+        }
+      ],
+      "hybrid_stats": {
+        "model_accepted": 5529,
+        "model_observed": 6144,
+        "suffix_accepted": 1137,
+        "suffix_observed": 1266
+      }
+    },
+    "speed_rag": {
+      "ids": [
+        "a0c7dfed9d6142bc91b3ce1fef2930ed",
+        "8e4d92f78d17492f8f86b2459cfb3c87",
+        "d36a9c0d6ca141bca508334ee0fd8a5e",
+        "5f0a15a8bc854d5fba26751eee4dac03",
+        "9807e96e75b64fa1ab39dd7f5753c126",
+        "8a4f1370bc814d65b7127cd265574067",
+        "dfcfc5138c654f90b827014cd10fbd49",
+        "a66255bdfc904a1e82a95d29a9db13d1",
+        "6799f966c4e24422b7efdd705a5ab21c",
+        "bf804731358c47e8888dae6144b9311f",
+        "7704487c48cc4bcf85c112a3c8fe3a38",
+        "025ad33d686a4b14ad6021cc041a400c",
+        "7ddae1ad89d246d7aeac324973523fef",
+        "0c12db672870460582dd7fe4321bcc09",
+        "87791f973349454392b3f0f17a09b88c",
+        "25d368ee28ee4eb8aa7b3879636043f2"
+      ],
+      "prompt_tokens": [
+        641,
+        776,
+        682,
+        685,
+        855,
+        715,
+        778,
+        692,
+        762,
+        748,
+        789,
+        744,
+        761,
+        157,
+        184,
+        725
+      ],
+      "waves": [
+        {
+          "wave": "cold",
+          "seconds": 6.725591253000005,
+          "output_tokens": 2521,
+          "output_tokens_per_second": 374.8369333142997,
+          "token_counts": [
+            370,
+            65,
+            98,
+            384,
+            86,
+            384,
+            72,
+            310,
+            109,
+            135,
+            11,
+            200,
+            95,
+            57,
+            15,
+            130
+          ],
+          "finish_reasons": {
+            "stop": 14,
+            "length": 2
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 1671,
+            "vllm:spec_decode_num_draft_tokens": 12810,
+            "vllm:spec_decode_num_drafts": 854
+          },
+          "accepted_per_draft": 1.9566744730679158,
+          "draft_token_acceptance": 0.1304449648711944,
+          "stage_profile": {
+            "execute_model": {
+              "calls": 254,
+              "device_ms": 4927.406947016716,
+              "host_ms": 1067.9179759999329,
+              "programs": 0
+            },
+            "observe": {
+              "calls": 253,
+              "device_ms": 1.845023985253647,
+              "host_ms": 17.122589999814863,
+              "programs": 887
+            },
+            "splice_prepare": {
+              "calls": 253,
+              "device_ms": 5.847904031164944,
+              "host_ms": 38.42498099970726,
+              "programs": 0
+            },
+            "native_propose": {
+              "calls": 253,
+              "device_ms": 1301.5705966949463,
+              "host_ms": 79.68269199926681,
+              "programs": 0
+            },
+            "local_scan": {
+              "calls": 253,
+              "device_ms": 1.2945279870182276,
+              "host_ms": 18.083749000425087,
+              "programs": 3714
+            },
+            "corpus_finalize": {
+              "calls": 253,
+              "device_ms": 1.8201920143328607,
+              "host_ms": 23.728730999891923,
+              "programs": 887
+            },
+            "route_publish": {
+              "calls": 253,
+              "device_ms": 0.9791360003873706,
+              "host_ms": 19.203338999432162,
+              "programs": 887
+            },
+            "splice_postprocess": {
+              "calls": 253,
+              "device_ms": 17.93664016202092,
+              "host_ms": 92.22766599992838,
+              "programs": 0
+            },
+            "ingest": {
+              "calls": 16,
+              "device_ms": 1.6319040060043335,
+              "host_ms": 2.8896369998960836,
+              "programs": 48
+            },
+            "splice_finish_host": {
+              "calls": 16,
+              "device_ms": 6.46291196346283,
+              "host_ms": 487.59084599987546,
+              "programs": 0
+            }
+          }
+        },
+        {
+          "wave": "hot-1",
+          "seconds": 6.186128156999985,
+          "output_tokens": 2628,
+          "output_tokens_per_second": 424.82146074297805,
+          "token_counts": [
+            375,
+            65,
+            191,
+            384,
+            83,
+            384,
+            59,
+            215,
+            224,
+            135,
+            11,
+            186,
+            94,
+            55,
+            15,
+            152
+          ],
+          "finish_reasons": {
+            "stop": 14,
+            "length": 2
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 1856,
+            "vllm:spec_decode_num_draft_tokens": 11580,
+            "vllm:spec_decode_num_drafts": 772
+          },
+          "accepted_per_draft": 2.4041450777202074,
+          "draft_token_acceptance": 0.16027633851468048,
+          "stage_profile": {
+            "execute_model": {
+              "calls": 216,
+              "device_ms": 4496.736098557711,
+              "host_ms": 996.7396619996407,
+              "programs": 0
+            },
+            "observe": {
+              "calls": 215,
+              "device_ms": 1.479487992823124,
+              "host_ms": 14.965981999523592,
+              "programs": 805
+            },
+            "splice_prepare": {
+              "calls": 215,
+              "device_ms": 5.016544013284147,
+              "host_ms": 33.11146400005782,
+              "programs": 0
+            },
+            "native_propose": {
+              "calls": 215,
+              "device_ms": 1121.113314628601,
+              "host_ms": 73.07321199971284,
+              "programs": 0
+            },
+            "local_scan": {
+              "calls": 215,
+              "device_ms": 1.1048959880135953,
+              "host_ms": 16.383491000055983,
+              "programs": 3379
+            },
+            "corpus_finalize": {
+              "calls": 215,
+              "device_ms": 1.7068160101771355,
+              "host_ms": 21.741114999315414,
+              "programs": 805
+            },
+            "route_publish": {
+              "calls": 215,
+              "device_ms": 0.8370880000293255,
+              "host_ms": 16.808028999719227,
+              "programs": 805
+            },
+            "splice_postprocess": {
+              "calls": 215,
+              "device_ms": 15.381632037460804,
+              "host_ms": 82.74752500062732,
+              "programs": 0
+            },
+            "ingest": {
+              "calls": 16,
+              "device_ms": 1.9881600216031075,
+              "host_ms": 3.1937759999323134,
+              "programs": 48
+            },
+            "splice_finish_host": {
+              "calls": 16,
+              "device_ms": 6.588704079389572,
+              "host_ms": 423.1848399998057,
+              "programs": 0
+            }
+          }
+        },
+        {
+          "wave": "hot-2",
+          "seconds": 5.684037863000015,
+          "output_tokens": 2630,
+          "output_tokens_per_second": 462.6992401158805,
+          "token_counts": [
+            384,
+            65,
+            87,
+            384,
+            82,
+            384,
+            76,
+            374,
+            113,
+            131,
+            11,
+            187,
+            95,
+            91,
+            15,
+            151
+          ],
+          "finish_reasons": {
+            "length": 3,
+            "stop": 13
+          },
+          "spec_metrics": {
+            "vllm:spec_decode_num_accepted_tokens": 1932,
+            "vllm:spec_decode_num_draft_tokens": 10575,
+            "vllm:spec_decode_num_drafts": 705
+          },
+          "accepted_per_draft": 2.7404255319148936,
+          "draft_token_acceptance": 0.18269503546099292,
+          "stage_profile": {
+            "execute_model": {
+              "calls": 196,
+              "device_ms": 4201.272668719292,
+              "host_ms": 939.3363580000482,
+              "programs": 0
+            },
+            "observe": {
+              "calls": 195,
+              "device_ms": 1.3516159881837666,
+              "host_ms": 14.077202000123634,
+              "programs": 739
+            },
+            "splice_prepare": {
+              "calls": 195,
+              "device_ms": 5.10582402581349,
+              "host_ms": 30.533197000409018,
+              "programs": 0
+            },
+            "native_propose": {
+              "calls": 195,
+              "device_ms": 1020.39497423172,
+              "host_ms": 64.40480999992815,
+              "programs": 0
+            },
+            "local_scan": {
+              "calls": 195,
+              "device_ms": 1.0026559890247881,
+              "host_ms": 14.806515000088893,
+              "programs": 3123
+            },
+            "corpus_finalize": {
+              "calls": 195,
+              "device_ms": 1.694720012601465,
+              "host_ms": 19.269569000357478,
+              "programs": 739
+            },
+            "route_publish": {
+              "calls": 195,
+              "device_ms": 0.7712640000972897,
+              "host_ms": 15.779995999878338,
+              "programs": 739
+            },
+            "splice_postprocess": {
+              "calls": 195,
+              "device_ms": 12.913824064657092,
+              "host_ms": 74.44761899989771,
+              "programs": 0
+            },
+            "ingest": {
+              "calls": 15,
+              "device_ms": 1.7586880028247833,
+              "host_ms": 2.7195040000833615,
+              "programs": 48
+            },
+            "splice_finish_host": {
+              "calls": 15,
+              "device_ms": 6.267487987875938,
+              "host_ms": 386.505977000013,
+              "programs": 0
+            }
+          }
+        }
+      ],
+      "hybrid_stats": {
+        "model_accepted": 903,
+        "model_observed": 1136,
+        "suffix_accepted": 1051,
+        "suffix_observed": 1191
+      }
+    }
+  }
+}

@@ -67,9 +67,9 @@ K=15、j=1、batch=4、64K corpus、temperature=0.8、自然 EOS。每类 16 条
 | SPEED coding | -1.62% | +1.26% | 4.566 | 4.658 | 547 |
 | SPEED RAG | +27.34% | +22.58% | 1.922 | 2.603 | 1282 |
 
-两轮结果表明 Blazedit 和 SPEED RAG 有稳定收益，SPEED coding 仅处于噪声区间。
-这是固定请求重放下的本地热态结果，不代表所有线上负载；未将 cold 或单次最优值
-作为稳定吞吐结论。两轮 JSON、日志和汇总均以 `refactor_` 为前缀保存在本目录。
+这两轮曾显示 Blazedit 和 SPEED RAG 收益、SPEED coding 处于噪声区间。
+后续打点复核发现历史本地运行存在 Windows GPU 外部占用，因此该表只保留为历史归档，
+不再据此宣称稳定收益。两轮 JSON、日志和汇总均以 `refactor_` 为前缀保存在本目录。
 
 ## 边界修复与查询优化后的本地配对
 
@@ -86,9 +86,53 @@ K=15、j=1、batch=4、64K corpus、temperature=0.8、自然 EOS。每类 16 条
 | SPEED coding | -2.84% | +0.30% | 未测 | 未测 |
 | SPEED RAG | +31.31% | +22.11% | +15.20% | +18.07% |
 
-默认保持 `dual`，4-only/回查只作显式消融。两轮波动较大，不将单轮最高值当作稳定收益。
-这些是最新修复后的本地 B4 热态结果，不替代高 batch 复测。对应 JSON、日志和汇总以
-`optimized_` 为前缀保存在本目录。
+默认保持 `dual`，4-only/回查只作显式消融。后续复核发现这两组运行存在外部 GPU
+占用和 pure 基线组间偏移，不能用该表评价查询优化的稳定收益。对应 JSON、日志和
+汇总以 `optimized_` 为前缀保留作问题复现，不作为最终性能结论。
+
+## 波动定位、分段耗时与入库修复
+
+2026-11-25 使用可选 CUDA events 对真实标准 DFlash 路径打点。打点只在
+`--profile-stages` 下启用，区间有嵌套，不能求和；最终吞吐另用无打点进程测量。
+脚本同时保存逐请求 token 哈希、每波起止时间和 WSL pinned memory 设置。
+
+历史 `optimized_` 两组之间的输出 token/draft 轨迹一致，但 pure 和 splice 的墙钟均
+发生组间漂移。复核时还发现 Windows 桌面负载在模型未运行时可占用约 36%–47% GPU。
+释放负载后，pure 的三类吞吐重新回到修复前区间，因此跨日期的绝对吞吐不能归因给
+splice 代码改动。
+
+固定 greedy、固定 384 token、B4、64K corpus、两轮 hot 的同口径对照表明：
+finalize 由旧版约 12.9–15.6 µs/次降至 8.5–9.4 µs/次，说明最长档直达有效；
+local scan 约 5.7–7.2 µs/次，剪枝只带来小幅变化，Blazedit 长匹配下额外归约略有
+回退。它们是每步微秒级成本，不是此前每波数百毫秒差异的来源。
+
+R8 跨轮长度修复的旧实现会克隆 `total_len` 并逐请求做 GPU 标量赋值。两轮 hot 的
+入库 host 时间因此达到 Blazedit 1166.4 ms、Coding 676.5 ms、RAG 850.4 ms；旧版未传
+最终长度时只有约 14 ms。修复后最终长度随 `(slot, start, final_length)` 文档描述一次
+传入 ingest kernel，缺少长度的旧接口由 kernel 回退到设备历史长度，不再 clone 或逐请求
+写标量。修复后的对应 host 时间为 12.5、13.6、12.5 ms。混合截断/回退入库回归和完整
+42/42 kernel 测试通过，standard DFlash 多请求 target logprobs E2E 也通过
+（1 passed in 105.22s）；无 pinned memory 的 host-only 复核降至每波约 5–6 ms。
+host 等待消除不保证等量减少整波墙钟，吞吐以无打点配对为准。host-only 包装本身也可能
+改变自然 EOS 轨迹，因此其批次形状只作诊断，不用于宣称慢波次已经修复。
+
+原始 JSON、日志和 GPU 状态分别以 `diagnostic_`、`final_` 为前缀保存。
+最终无打点的两次 splice 进程中，三类数据的 cold/hot-1/hot-2 逐请求 token 哈希全部
+一致，但 Coding hot-1 仍为 7.958→6.237 s；GPU 频率约 2820 MHz，而利用率由 85.1%
+恢复为 99.8%，证实是首轮执行空泡而非候选/输出变化。新增 `--warmup-wave` 将首次
+JIT/缓存与正式冷语料波次隔离，warmup 后清空 corpus 和统计，不计入性能汇总。
+
+自然 EOS、无打点、原始采样配置的两轮 hot 合计结果：
+
+| 数据集 | 第一轮相对 pure | 第二轮相对 pure（交换进程顺序） | 独立 warmup 配对 |
+| --- | ---: | ---: | ---: |
+| Blazedit | +11.29% | +15.66% | +14.43% |
+| SPEED Coding | −9.88% | +2.64% | −8.36% |
+| SPEED RAG | +19.77% | +20.52% | +19.92% |
+
+warmup 前后的 splice token 哈希仍完全一致，因此 warmup 改变了 JIT 计时边界，但没有
+消除 Coding hot-1 空泡；该问题继续由 host-only 逐步计时定位，不能将第二轮单独视为
+稳定结论。
 
 ## 文件
 

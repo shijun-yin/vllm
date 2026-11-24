@@ -1,10 +1,13 @@
 import argparse
+import hashlib
 import json
+import os
 import random
 import time
 from collections import Counter
 from pathlib import Path
 
+import torch
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
@@ -19,6 +22,165 @@ DATASETS = (
     "spec_rag",
     "spec_summarization",
 )
+
+
+class StageProfiler:
+    def __init__(self, record_events=True):
+        self.record_events = record_events
+        self.events = {}
+        self.intervals = {}
+        self.programs = Counter()
+
+    def clear(self):
+        self.events.clear()
+        self.intervals.clear()
+        self.programs.clear()
+
+    def invoke(self, name, fn, programs=0, shape=None):
+        start_time = time.perf_counter()
+        if self.record_events:
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+            start.record()
+        try:
+            return fn()
+        finally:
+            if self.record_events:
+                end.record()
+                self.events.setdefault(name, []).append((start, end))
+            end_time = time.perf_counter()
+            self.intervals.setdefault(name, []).append((start_time, end_time, shape))
+            self.programs[name] += programs
+
+    def wrap_method(self, obj, attr, name):
+        original = getattr(obj, attr)
+
+        def timed(*args, **kwargs):
+            return self.invoke(name, lambda: original(*args, **kwargs))
+
+        setattr(obj, attr, timed)
+
+    def wrap_execute_model(self, runner):
+        original = runner.execute_model
+
+        def timed(scheduler_output, *args, **kwargs):
+            shape = (
+                len(scheduler_output.num_scheduled_tokens),
+                scheduler_output.total_num_scheduled_tokens,
+                len(scheduler_output.finished_req_ids),
+            )
+            return self.invoke(
+                "execute_model",
+                lambda: original(scheduler_output, *args, **kwargs),
+                shape=shape,
+            )
+
+        runner.execute_model = timed
+
+    def wrap_kernel(self, module, attr, name):
+        original = getattr(module, attr)
+        profiler = self
+
+        class TimedKernel:
+            def __getitem__(self, grid):
+                launch = original[grid]
+                programs = 1
+                for size in grid:
+                    programs *= size
+
+                def timed(*args, **kwargs):
+                    return profiler.invoke(
+                        name, lambda: launch(*args, **kwargs), programs=programs
+                    )
+
+                return timed
+
+        setattr(module, attr, TimedKernel())
+
+    def install(self, runner):
+        from vllm.v1.worker.gpu.spec_decode.hybrid import speculator as hybrid_module
+        from vllm.v1.worker.gpu.spec_decode.suffix import speculator as suffix_module
+
+        self.wrap_execute_model(runner)
+        if runner.speculator is not None:
+            self.wrap_method(runner.speculator, "propose", "native_propose")
+        if runner.splice is None:
+            return
+        self.wrap_method(runner.splice, "prepare_propose", "splice_prepare")
+        self.wrap_method(runner.splice, "postprocess", "splice_postprocess")
+        self.wrap_method(
+            runner.splice,
+            "on_requests_finished_with_lengths",
+            "splice_finish_host",
+        )
+        self.wrap_kernel(
+            hybrid_module,
+            "_hybrid_observe_kernel",
+            "observe",
+        )
+        self.wrap_kernel(
+            hybrid_module,
+            "_hybrid_route_publish_kernel",
+            "route_publish",
+        )
+        self.wrap_method(suffix_module, "async_tensor_h2d", "ingest_h2d")
+        self.wrap_kernel(
+            suffix_module,
+            "_suffix_local_scan_kernel",
+            "local_scan",
+        )
+        self.wrap_kernel(
+            suffix_module,
+            "_suffix_finalize_kernel",
+            "corpus_finalize",
+        )
+        self.wrap_kernel(
+            suffix_module,
+            "_suffix_ingest_kernel",
+            "ingest",
+        )
+
+    def snapshot(self):
+        if self.record_events:
+            torch.cuda.synchronize()
+        result = {}
+        for name, intervals in self.intervals.items():
+            durations = [(end - start) * 1000 for start, end, _ in intervals]
+            item = {
+                "calls": len(intervals),
+                "host_ms": sum(durations),
+                "max_host_ms": max(durations),
+                "p95_host_ms": sorted(durations)[int(0.95 * (len(durations) - 1))],
+                "programs": self.programs[name],
+            }
+            if self.record_events:
+                item["device_ms"] = sum(
+                    start.elapsed_time(end) for start, end in self.events[name]
+                )
+            if name == "execute_model":
+                gaps = [
+                    max(0.0, current[0] - previous[1]) * 1000
+                    for previous, current in zip(intervals, intervals[1:])
+                ]
+                item["gap_host_ms"] = sum(gaps)
+                item["max_gap_ms"] = max(gaps, default=0.0)
+                item["shape_counts"] = dict(
+                    Counter(str(shape) for _, _, shape in intervals)
+                )
+                item["slowest"] = [
+                    {
+                        "call": index,
+                        "host_ms": durations[index],
+                        "gap_before_ms": gaps[index - 1] if index else 0.0,
+                        "shape": shape,
+                    }
+                    for index, (_, _, shape) in sorted(
+                        enumerate(intervals), key=lambda pair: durations[pair[0]]
+                    )[-5:]
+                ]
+            result[name] = item
+        self.clear()
+        return result
 
 
 class SpecStateExtension:
@@ -40,6 +202,21 @@ class SpecStateExtension:
             "suffix_accepted": int(splice.suffix_stats[..., 0].sum().item()),
             "suffix_observed": int(splice.suffix_stats[..., 1].sum().item()),
         }
+
+    def enable_stage_profile(self, record_events=True):
+        self.stage_profiler = StageProfiler(record_events=record_events)
+        self.stage_profiler.install(self.model_runner)
+        return True
+
+    def reset_stage_profile(self):
+        if hasattr(self, "stage_profiler"):
+            self.stage_profiler.clear()
+        return True
+
+    def read_stage_profile(self):
+        if not hasattr(self, "stage_profiler"):
+            return None
+        return self.stage_profiler.snapshot()
 
 
 def render(tokenizer, content):
@@ -156,13 +333,25 @@ def run_wave(llm, prompts, wave, args):
         for index in range(len(prompts))
     ]
     before = metric_values(llm)
+    if args.profile_stages or args.profile_host:
+        llm.collective_rpc("reset_stage_profile")
+    start_timestamp = time.time()
     start = time.perf_counter()
     outputs = llm.generate(
         [prompt["text"] for prompt in prompts], sampling_params, use_tqdm=False
     )
     seconds = time.perf_counter() - start
+    end_timestamp = time.time()
     after = metric_values(llm)
     token_counts = [len(output.outputs[0].token_ids) for output in outputs]
+    token_hashes = [
+        hashlib.sha256(
+            json.dumps(
+                list(output.outputs[0].token_ids), separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+        for output in outputs
+    ]
     metrics = {
         name: after.get(name, 0) - before.get(name, 0)
         for name in set(before) | set(after)
@@ -172,10 +361,13 @@ def run_wave(llm, prompts, wave, args):
     accepted = metrics.get("vllm:spec_decode_num_accepted_tokens", 0)
     result = {
         "wave": wave,
+        "start_timestamp": start_timestamp,
+        "end_timestamp": end_timestamp,
         "seconds": seconds,
         "output_tokens": sum(token_counts),
         "output_tokens_per_second": sum(token_counts) / seconds,
         "token_counts": token_counts,
+        "token_hashes": token_hashes,
         "finish_reasons": dict(
             Counter(output.outputs[0].finish_reason for output in outputs)
         ),
@@ -183,6 +375,8 @@ def run_wave(llm, prompts, wave, args):
         "accepted_per_draft": accepted / drafts if drafts else None,
         "draft_token_acceptance": accepted / draft_tokens if draft_tokens else None,
     }
+    if args.profile_stages or args.profile_host:
+        result["stage_profile"] = llm.collective_rpc("read_stage_profile")[0]
     print(
         "WAVE_RESULT="
         + json.dumps(
@@ -210,6 +404,7 @@ def main():
     parser.add_argument("--num-prompts", type=int, default=16)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--hot-rounds", type=int, default=2)
+    parser.add_argument("--warmup-wave", action="store_true")
     parser.add_argument("--max-tokens", type=int, default=384)
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--top-p", type=float, default=1.0)
@@ -231,6 +426,8 @@ def main():
     parser.add_argument("--max-model-len", type=int, default=3072)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.98)
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--profile-stages", action="store_true")
+    parser.add_argument("--profile-host", action="store_true")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
@@ -294,8 +491,9 @@ def main():
                 suffix_hybrid_mode="splice",
                 suffix_hybrid_prefix_length=args.prefix_len,
                 suffix_hybrid_min_match_length=4,
-                suffix_hybrid_corpus_key_mode=args.corpus_key_mode,
             )
+            if args.corpus_key_mode != "dual":
+                spec["suffix_hybrid_corpus_key_mode"] = args.corpus_key_mode
 
     llm = LLM(
         model=str(model),
@@ -311,9 +509,17 @@ def main():
         worker_extension_cls=f"{__name__}.SpecStateExtension",
         seed=1234,
     )
+    if args.profile_stages or args.profile_host:
+        llm.collective_rpc(
+            "enable_stage_profile",
+            kwargs={"record_events": args.profile_stages},
+        )
     results = {}
     for dataset in datasets:
         llm.collective_rpc("reset_spec_state")
+        if args.warmup_wave:
+            run_wave(llm, prompts[dataset], "warmup", args)
+            llm.collective_rpc("reset_spec_state")
         waves = [run_wave(llm, prompts[dataset], "cold", args)]
         waves.extend(
             run_wave(llm, prompts[dataset], f"hot-{index + 1}", args)
@@ -348,6 +554,10 @@ def main():
         "max_model_len": args.max_model_len,
         "gpu_memory_utilization": args.gpu_memory_utilization,
         "num_speculative_tokens": k if args.mode != "no_spec" else 0,
+        "profile_stages": args.profile_stages,
+        "profile_host": args.profile_host or None,
+        "warmup_wave": args.warmup_wave or None,
+        "wsl_pin_memory": os.environ.get("VLLM_WSL2_ENABLE_PIN_MEMORY"),
         "results": results,
     }
     Path(args.output).write_text(json.dumps(output, indent=2))

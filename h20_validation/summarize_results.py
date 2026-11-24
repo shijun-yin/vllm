@@ -23,6 +23,20 @@ def hot_metrics(result):
     }
 
 
+def stage_metrics(result):
+    stages = {}
+    for wave in result["waves"]:
+        if not wave["wave"].startswith("hot-"):
+            continue
+        for name, values in wave.get("stage_profile", {}).items():
+            total = stages.setdefault(
+                name, {"device_ms": 0.0, "host_ms": 0.0, "calls": 0, "programs": 0}
+            )
+            for key in total:
+                total[key] += values.get(key, 0)
+    return stages
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("pure", type=Path)
@@ -49,6 +63,10 @@ def main():
         "batch_size",
         "max_model_len",
         "gpu_memory_utilization",
+        "profile_stages",
+        "profile_host",
+        "warmup_wave",
+        "wsl_pin_memory",
     ):
         if pure.get(key) != splice.get(key):
             raise ValueError(f"Mismatched {key}: {pure.get(key)} != {splice.get(key)}")
@@ -83,6 +101,24 @@ def main():
             f"| {splice_hot['tokens_per_second']:.2f} | {delta:+.2%} "
             f"| {pure_al:.3f} | {splice_al:.3f} | {observed} |"
         )
+        if not splice.get("profile_stages"):
+            continue
+        pure_stages = stage_metrics(pure_result)
+        splice_stages = stage_metrics(splice_result)
+        print(f"\n{name} hot stages (nested intervals; do not sum device times):")
+        print(
+            "| Stage | Pure device ms | Splice device ms | Pure host ms "
+            "| Splice host ms | Calls P/S |"
+        )
+        print("|---|---:|---:|---:|---:|---:|")
+        for stage in sorted(pure_stages.keys() | splice_stages.keys()):
+            p = pure_stages.get(stage, {"device_ms": 0.0, "host_ms": 0.0, "calls": 0})
+            s = splice_stages.get(stage, {"device_ms": 0.0, "host_ms": 0.0, "calls": 0})
+            print(
+                f"| {stage} | {p['device_ms']:.3f} | {s['device_ms']:.3f} "
+                f"| {p['host_ms']:.3f} | {s['host_ms']:.3f} "
+                f"| {p['calls']}/{s['calls']} |"
+            )
 
 
 if __name__ == "__main__":
