@@ -23,7 +23,7 @@ index 7f9a265d66..3a2921baaa 100644
        - vllm/v1/worker/gpu/sample/
        - vllm/v1/worker/gpu/spec_decode/
 diff --git a/docs/features/speculative_decoding/README.md b/docs/features/speculative_decoding/README.md
-index ddc4997ccc..65b27f1272 100644
+index ddc4997ccc..a77c236073 100644
 --- a/docs/features/speculative_decoding/README.md
 +++ b/docs/features/speculative_decoding/README.md
 @@ -16,6 +16,7 @@ vLLM supports a variety of methods of speculative decoding. Model-based methods
@@ -34,7 +34,7 @@ index ddc4997ccc..65b27f1272 100644
  - [Hidden State Extraction](extract_hidden_states.md)
  - [Custom Speculators (Experimental)](#custom-speculators-experimental)
  - [Dynamic Speculative Decoding](dynamic_speculative_decoding.md)
-@@ -64,6 +65,87 @@ Draft sampling defaults to `greedy`; set `draft_sample_method` to
+@@ -64,6 +65,90 @@ Draft sampling defaults to `greedy`; set `draft_sample_method` to
  Set `enable_adaptive_verification` to `true` in the speculative config to
  enable [adaptive verification](adaptive_verification.md).
  
@@ -90,7 +90,10 @@ index ddc4997ccc..65b27f1272 100644
 +bound, not just `max_model_len`. Rows without newly sampled tokens, empty
 +corpora, blocks without a full continuation, and locally maximal matches skip
 +avoidable work. Finished-request corpus ingestion uses the scheduler's final
-+trimmed token length, carried with the next completion notification. Set
++trimmed token length, carried with the next completion notification. Requests
++using string `stop` and aborted requests are excluded from the shared corpus so
++front-end-trimmed tokens cannot become other requests' candidates; request-local
++matching is unaffected. Set
 +`suffix_hybrid_min_expected_accepted` to add an expected acceptance
 +threshold after the statistics mature. Counts are halved every
 +`suffix_hybrid_stats_half_life` feedback steps (default 1024).
@@ -122,6 +125,19 @@ index ddc4997ccc..65b27f1272 100644
  ## Custom Speculators (Experimental)
  
  You can plug in your own speculator by registering it as a speculative method
+diff --git a/docs/features/speculative_decoding/suffix.md b/docs/features/speculative_decoding/suffix.md
+index 65194672f6..2fe6fb8e8f 100644
+--- a/docs/features/speculative_decoding/suffix.md
++++ b/docs/features/speculative_decoding/suffix.md
+@@ -40,7 +40,7 @@ The longer match wins. The draft always has `num_speculative_tokens` tokens; slo
+ Seeded sampling isn't reproducible with suffix decoding: drafts come from previously finished requests, and with adaptive verification the number of verified slots depends on the batch. For reproducible seeded sampling, set `suffix_decoding_corpus_tokens: 0` and leave adaptive verification off.
+ 
+ !!! warning "The corpus is shared"
+-    The corpus holds responses from all requests, whatever their `cache_salt` or LoRA adapter, and any request can draft from it. Drafts never change the output distribution, but how many are accepted shows in decode speed. Where requests must not influence each other, set `suffix_decoding_corpus_tokens: 0`.
++    The corpus holds responses from all requests, whatever their `cache_salt` or LoRA adapter, and any request can draft from it. Drafts never change the output distribution, but how many are accepted shows in decode speed. Where requests must not influence each other, set `suffix_decoding_corpus_tokens: 0`. Requests using string `stop` and aborted requests are excluded from the corpus so front-end-trimmed tokens cannot leak into other requests; request-local suffix matching still works.
+ 
+ ## Adaptive verification
+ 
 diff --git a/tests/test_config.py b/tests/test_config.py
 index accd4e91dd..f7614457a1 100644
 --- a/tests/test_config.py
@@ -295,10 +311,10 @@ index accd4e91dd..f7614457a1 100644
      config = _watermarked_vllm_config()
      config.watermark_config = WatermarkConfig(
 diff --git a/tests/v1/core/test_scheduler.py b/tests/v1/core/test_scheduler.py
-index 45e976ddaf..879190126f 100644
+index 45e976ddaf..05580772b2 100644
 --- a/tests/v1/core/test_scheduler.py
 +++ b/tests/v1/core/test_scheduler.py
-@@ -2182,6 +2182,10 @@ def test_stop_via_update_from_output():
+@@ -2182,6 +2182,11 @@ def test_stop_via_update_from_output():
      assert requests[0].request_id in scheduler.finished_req_ids
      assert list(requests[0].output_token_ids) == [10, 42]
      assert list(requests[1].output_token_ids) == [13, 14]
@@ -306,10 +322,72 @@ index 45e976ddaf..879190126f 100644
 +    assert next_output.finished_req_token_lengths == {
 +        requests[0].request_id: requests[0].num_tokens
 +    }
++    assert next_output.suffix_corpus_excluded_req_ids == set()
  
      # Test case 3: Stop on max tokens
      scheduler = create_scheduler(num_speculative_tokens=2)
-@@ -5358,6 +5362,7 @@ def test_abort_request_when_structured_output_fsm_cannot_advance():
+@@ -2258,6 +2263,60 @@ def test_stop_via_update_from_output():
+     assert list(requests[0].output_token_ids) == [EOS_TOKEN_ID, 10, 11]
+ 
+ 
++def test_suffix_corpus_excludes_string_stop_request():
++    scheduler = create_scheduler(num_speculative_tokens=1)
++    requests = create_requests(num_requests=2, max_tokens=10)
++    requests[0].sampling_params.stop = ["END"]
++    for req in requests:
++        req.num_computed_tokens = req.num_tokens
++        scheduler.requests[req.request_id] = req
++        scheduler.running.append(req)
++        req.status = RequestStatus.RUNNING
++
++    scheduler_output = SchedulerOutput(
++        scheduled_new_reqs=[],
++        scheduled_cached_reqs=CachedRequestData.make_empty(),
++        num_scheduled_tokens={req.request_id: 1 for req in requests},
++        total_num_scheduled_tokens=2,
++        scheduled_encoder_inputs={},
++        scheduled_spec_decode_tokens={req.request_id: [] for req in requests},
++        finished_req_ids=set(),
++        free_encoder_mm_hashes=[],
++    )
++    scheduler.update_from_output(
++        scheduler_output,
++        ModelRunnerOutput(
++            req_ids=[req.request_id for req in requests],
++            sampled_token_ids=[[EOS_TOKEN_ID], [10]],
++            logprobs=None,
++            prompt_logprobs_dict={},
++            pooler_output=[],
++        ),
++    )
++
++    output = scheduler.schedule()
++    assert output.suffix_corpus_excluded_req_ids == {requests[0].request_id}
++    assert output.finished_req_token_lengths == {
++        requests[0].request_id: requests[0].num_tokens
++    }
++    assert scheduler.schedule().suffix_corpus_excluded_req_ids == set()
++
++
++def test_suffix_corpus_excludes_external_abort():
++    scheduler = create_scheduler(num_speculative_tokens=1)
++    (request,) = create_requests(num_requests=1, max_tokens=10)
++    request.num_computed_tokens = request.num_tokens
++    scheduler.requests[request.request_id] = request
++    scheduler.running.append(request)
++    request.status = RequestStatus.RUNNING
++
++    scheduler.finish_requests(request.request_id, RequestStatus.FINISHED_ABORTED)
++    output = scheduler.schedule()
++
++    assert output.suffix_corpus_excluded_req_ids == {request.request_id}
++    assert output.finished_req_token_lengths == {}
++
++
+ def test_check_stop_min_tokens():
+     """Test that sampled stop tokens still finish under min_tokens."""
+     from vllm.v1.core.sched.utils import check_stop
+@@ -5358,6 +5417,7 @@ def test_abort_request_when_structured_output_fsm_cannot_advance():
      scheduler.kv_event_publisher = Mock()
      scheduler.finished_req_ids = set()
      scheduler.finished_req_ids_dict = None
@@ -318,10 +396,10 @@ index 45e976ddaf..879190126f 100644
      scheduler.grammar_compile_error_reqs = {}
      scheduler.encoder_cache_mismatch_reqs = set()
 diff --git a/tests/v1/e2e/spec_decode/ngram_suffix/test_ngram_suffix.py b/tests/v1/e2e/spec_decode/ngram_suffix/test_ngram_suffix.py
-index 8113a0b2cb..2b191d4b2d 100644
+index 8113a0b2cb..ff0aba55a6 100644
 --- a/tests/v1/e2e/spec_decode/ngram_suffix/test_ngram_suffix.py
 +++ b/tests/v1/e2e/spec_decode/ngram_suffix/test_ngram_suffix.py
-@@ -5,6 +5,7 @@ import math
+@@ -5,9 +5,12 @@ import math
  
  import pytest
  
@@ -329,7 +407,12 @@ index 8113a0b2cb..2b191d4b2d 100644
  from tests.utils import single_gpu_only
  from vllm import SamplingParams
  from vllm.config import CompilationConfig
-@@ -203,3 +204,239 @@ def test_ngram_verification_applies_logit_bias_and_min_p(
++from vllm.logprobs import Logprob
++from vllm.outputs import CompletionOutput, RequestOutput
+ from vllm.platforms import current_platform
+ 
+ from ..utils import (
+@@ -203,3 +206,352 @@ def test_ngram_verification_applies_logit_bias_and_min_p(
          unfiltered, _ = generate(prompts, SamplingParams(**stochastic))
          num_unfiltered_below = num_below_min_p(unfiltered)
          assert num_unfiltered_below > 0
@@ -391,13 +474,38 @@ index 8113a0b2cb..2b191d4b2d 100644
 +        for position, (token_0, token_1) in enumerate(
 +            zip(expected_completion.token_ids, actual_completion.token_ids)
 +        ):
-+            if token_0 != token_1:
-+                break
++            assert token_0 == token_1, f"{name}: token mismatch at {position}"
 +            logprob_0 = expected_completion.logprobs[position][token_0].logprob
 +            logprob_1 = actual_completion.logprobs[position][token_1].logprob
 +            assert math.isclose(logprob_0, logprob_1, rel_tol=1e-3, abs_tol=1e-3), (
 +                f"{name}: logprob mismatch at {position}: {logprob_0} != {logprob_1}"
 +            )
++
++
++def _make_output(tokens, logprobs):
++    completion = CompletionOutput(
++        index=0,
++        text="",
++        token_ids=tokens,
++        cumulative_logprob=sum(logprobs),
++        logprobs=[
++            {token: Logprob(logprob)}
++            for token, logprob in zip(tokens, logprobs, strict=True)
++        ],
++        finish_reason="stop",
++    )
++    return RequestOutput("test", None, [], None, [completion], True)
++
++
++def test_greedy_output_close_rejects_late_mutation():
++    expected = _make_output([1, 2, 3], [-0.1, -0.2, -0.3])
++    different_token = _make_output([1, 2, 4], [-0.1, -0.2, -0.3])
++    with pytest.raises(AssertionError, match="token mismatch at 2"):
++        check_greedy_output_close([expected], [different_token], "mutation")
++
++    different_logprob = _make_output([1, 2, 3], [-0.1, -0.2, -0.5])
++    with pytest.raises(AssertionError, match="logprob mismatch at 2"):
++        check_greedy_output_close([expected], [different_logprob], "mutation")
 +
 +
 +class SpliceProbe:
@@ -417,6 +525,46 @@ index 8113a0b2cb..2b191d4b2d 100644
 +            else 0
 +        )
 +        return type(drafter).__name__, observed, corpus_observed
++
++    def enable_stop_trace(self):
++        splice = self.model_runner.splice
++        self.stop_trace = []
++        original = splice.on_requests_finished_with_lengths
++
++        def on_finished(finished_req_ids, final_token_lengths, excluded_req_ids=None):
++            req_states = self.model_runner.req_states
++            for req_id in finished_req_ids:
++                req_index = req_states.req_id_to_index.get(req_id)
++                if req_index is None:
++                    continue
++                prompt_len = int(req_states.prompt_len.np[req_index])
++                total_len = int(req_states.total_len.gpu[req_index].item())
++                excluded = excluded_req_ids is not None and req_id in excluded_req_ids
++                self.stop_trace.append(
++                    {
++                        "request_id": req_id,
++                        "generated_tokens": req_states.all_token_ids.gpu[
++                            req_index, prompt_len:total_len
++                        ]
++                        .cpu()
++                        .tolist(),
++                        "excluded": excluded,
++                    }
++                )
++            return original(
++                finished_req_ids, final_token_lengths, excluded_req_ids=excluded_req_ids
++            )
++
++        splice.on_requests_finished_with_lengths = on_finished
++        return True
++
++    def read_stop_trace(self):
++        splice = self.model_runner.splice
++        return {
++            "events": self.stop_trace,
++            "num_docs": splice.suffix.num_docs,
++            "corpus_head": int(splice.suffix.corpus_head.item()),
++        }
 +
 +
 +def check_splice_llm_correctness(
@@ -506,6 +654,54 @@ index 8113a0b2cb..2b191d4b2d 100644
 +    )
 +
 +
++@single_gpu_only
++def test_suffix_splice_string_stop_not_ingested(vllm_runner):
++    model = "Qwen/Qwen3-4B-FP8" if current_platform.is_cuda() else "Qwen/Qwen3-4B"
++    speculative_config = {
++        "method": "dflash",
++        "model": "z-lab/Qwen3-4B-DFlash-b16",
++        "num_speculative_tokens": 7,
++        "suffix_hybrid_mode": "splice",
++        "suffix_hybrid_min_match_length": 2,
++        "suffix_decoding_max_tree_depth": 8,
++        "suffix_decoding_corpus_tokens": 65536,
++    }
++    with vllm_runner(
++        model,
++        speculative_config=speculative_config,
++        worker_extension_cls=f"{__name__}.SpliceProbe",
++        max_model_len=512,
++        max_num_seqs=1,
++        max_num_batched_tokens=512,
++        enable_prefix_caching=False,
++        gpu_memory_utilization=0.9,
++    ) as runner:
++        runner.llm.collective_rpc("enable_stop_trace")
++        prompt = "Repeat this exact sentence: alpha END omega"
++        output = runner.llm.generate(
++            [prompt],
++            SamplingParams(temperature=0, max_tokens=16, stop=["END"]),
++        )[0].outputs[0]
++        assert output.stop_reason == "END"
++        runner.llm.generate(
++            ["Write a haiku about rain."],
++            SamplingParams(temperature=0, max_tokens=8),
++        )
++        runner.llm.generate(
++            ["Write a short poem about the sea."],
++            SamplingParams(temperature=0, max_tokens=8),
++        )
++
++        trace = runner.llm.collective_rpc("read_stop_trace")[0]
++        excluded = [event for event in trace["events"] if event["excluded"]]
++        assert excluded
++        assert any(
++            len(event["generated_tokens"]) > len(output.token_ids) for event in excluded
++        ), "Expected hidden tokens past the front-end stop boundary"
++        assert trace["num_docs"] > 0
++        assert trace["corpus_head"] > 0
++
++
 +@pytest.mark.parametrize("max_num_seqs", [1, 2])
 +@single_gpu_only
 +def test_suffix_splice_dflash2_llm_correctness(vllm_runner, max_num_seqs):
@@ -570,21 +766,26 @@ index 8113a0b2cb..2b191d4b2d 100644
 +        expected_drafter="DFlashSpeculator",
 +    )
 diff --git a/tests/v1/e2e/spec_decode/test_distribution_shift.py b/tests/v1/e2e/spec_decode/test_distribution_shift.py
-index 7cbe482761..fa47a99f24 100644
+index 7cbe482761..102aaa4237 100644
 --- a/tests/v1/e2e/spec_decode/test_distribution_shift.py
 +++ b/tests/v1/e2e/spec_decode/test_distribution_shift.py
-@@ -1,6 +1,7 @@
+@@ -1,7 +1,9 @@
  # SPDX-License-Identifier: Apache-2.0
  # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
  
+-from collections import Counter
 +import math
- from collections import Counter
++from collections import Counter, defaultdict
++from statistics import median
  
  import pytest
-@@ -9,42 +10,40 @@ from scipy.stats import chi2_contingency
+ import regex as re
+@@ -9,42 +11,42 @@ from scipy.stats import chi2_contingency
  
  from tests.utils import single_gpu_only
  from vllm import SamplingParams
++from vllm.logprobs import Logprob
++from vllm.outputs import CompletionOutput, RequestOutput
 +from vllm.platforms import current_platform
  from vllm.sampling_params import StructuredOutputsParams
  
@@ -636,7 +837,7 @@ index 7cbe482761..fa47a99f24 100644
                      structured_outputs=StructuredOutputsParams(regex=regex),
                  )
                  for i in range(num_samples)
-@@ -62,10 +61,146 @@ def test_structured_output_preserves_sampling_distribution(
+@@ -62,10 +64,330 @@ def test_structured_output_preserves_sampling_distribution(
              assert all(re.fullmatch(regex, text) for text in texts), (
                  "Grammar-invalid output"
              )
@@ -708,6 +909,187 @@ index 7cbe482761..fa47a99f24 100644
 +            int(splice.suffix_stats[corpus_start:, ..., 1].sum().item()),
 +        )
 +
++    def enable_splice_trace(self):
++        splice = self.model_runner.splice
++        self.splice_events = []
++        self.splice_pending = {}
++        original_postprocess = splice.postprocess
++        original_prepare = splice.prepare_propose
++        original_add = splice.add_request
++
++        def add_request(req_index, new_req_data):
++            self.splice_pending.pop(req_index, None)
++            return original_add(req_index, new_req_data)
++
++        def postprocess(model_drafts, input_batch, num_sampled, last_sampled, k):
++            drafts = original_postprocess(
++                model_drafts, input_batch, num_sampled, last_sampled, k
++            )
++            if k > 0:
++                req_states = self.model_runner.req_states
++                for batch_index, req_index in enumerate(
++                    input_batch.idx_mapping.tolist()
++                ):
++                    if req_index < 0 or not splice.last_use_suffix[req_index].item():
++                        continue
++                    self.splice_pending[req_index] = {
++                        "request_id": req_states.index_to_req_id[req_index].split(
++                            "-", 1
++                        )[0],
++                        "start": int(req_states.total_len.gpu[req_index].item())
++                        - int(req_states.prompt_len.np[req_index]),
++                        "draft": drafts[batch_index, :k].cpu().tolist(),
++                        "prefix_len": splice.prefix_len,
++                    }
++            return drafts
++
++        def prepare_propose(input_batch, num_sampled, num_rejected):
++            for batch_index, req_index in enumerate(input_batch.idx_mapping.tolist()):
++                event = self.splice_pending.pop(req_index, None)
++                if event is None:
++                    continue
++                event["accepted"] = int(num_sampled[batch_index].item()) - 1
++                event["rejected"] = bool(num_rejected[batch_index].item())
++                self.splice_events.append(event)
++            return original_prepare(input_batch, num_sampled, num_rejected)
++
++        splice.add_request = add_request
++        splice.postprocess = postprocess
++        splice.prepare_propose = prepare_propose
++        return True
++
++    def read_splice_trace(self):
++        return self.splice_events
++
++
++def _conditional_tokens(outputs, position, prefix):
++    samples = []
++    for output in outputs:
++        completion = output.outputs[0]
++        if (
++            len(completion.token_ids) > position
++            and tuple(completion.token_ids[:position]) == prefix
++        ):
++            samples.append(completion.token_ids[position])
++    return samples
++
++
++def _token_logprob(output, position, token):
++    completion = output.outputs[0]
++    if len(completion.token_ids) <= position:
++        return None
++    logprobs = completion.logprobs[position]
++    return logprobs[token].logprob if token in logprobs else None
++
++
++def check_splice_affected_positions(outputs_by_mode, events):
++    splice_outputs = {output.request_id: output for output in outputs_by_mode["splice"]}
++    other_outputs = {
++        mode: {output.request_id: output for output in outputs}
++        for mode, outputs in outputs_by_mode.items()
++        if mode != "splice"
++    }
++    affected = {"accepted": set(), "rejected": set()}
++    event_logprobs = []
++    for event in events:
++        output = splice_outputs[event["request_id"]]
++        token_ids = output.outputs[0].token_ids
++        positions = [
++            ("accepted", position)
++            for position in range(event["prefix_len"], event["accepted"])
++        ]
++        if event["rejected"] and event["prefix_len"] <= event["accepted"] < len(
++            event["draft"]
++        ):
++            positions.append(("rejected", event["accepted"]))
++        for kind, position in positions:
++            if position >= len(token_ids):
++                continue
++            prefix = tuple(token_ids[:position])
++            affected[kind].add((position, prefix))
++            sampled_token = token_ids[position]
++            event_logprobs.append((kind, event, position, prefix, sampled_token))
++
++    compared = {"accepted": 0, "rejected": 0}
++    for kind, groups in affected.items():
++        for position, prefix in groups:
++            samples = {
++                mode: _conditional_tokens(outputs, position, prefix)
++                for mode, outputs in outputs_by_mode.items()
++            }
++            if not all(len(sample) >= 10 for sample in samples.values()):
++                continue
++            assert_grammar_distribution_unchanged(
++                Counter(samples["target"]), Counter(samples["splice"])
++            )
++            assert_grammar_distribution_unchanged(
++                Counter(samples["native"]), Counter(samples["splice"])
++            )
++            compared[kind] += 1
++    assert all(compared.values()), (
++        f"Insufficient affected distribution groups: {compared}"
++    )
++
++    matched = {(kind, mode): 0 for kind in affected for mode in other_outputs}
++    logprob_errors = defaultdict(list)
++    for kind, event, position, prefix, candidate in event_logprobs:
++        splice_logprob = _token_logprob(
++            splice_outputs[event["request_id"]], position, candidate
++        )
++        if splice_logprob is None:
++            continue
++        for mode, outputs in other_outputs.items():
++            output = outputs[event["request_id"]]
++            if tuple(output.outputs[0].token_ids[:position]) != prefix:
++                continue
++            other_logprob = _token_logprob(output, position, candidate)
++            if other_logprob is None:
++                continue
++            logprob_errors[kind, mode].append(abs(splice_logprob - other_logprob))
++            matched[kind, mode] += 1
++    assert all(matched.values()), f"Insufficient affected logprob checks: {matched}"
++    for (kind, mode), errors in logprob_errors.items():
++        drift = median(errors)
++        assert drift <= 0.1, f"{kind} logprob drift at {mode}: {drift}; errors={errors}"
++
++
++def _splice_test_output(request_id, second_logprob):
++    tokens = [10, 20, 30]
++    logprobs = [-0.1, -0.15, second_logprob]
++    completion = CompletionOutput(
++        index=0,
++        text="",
++        token_ids=tokens,
++        cumulative_logprob=sum(logprobs),
++        logprobs=[
++            {token: Logprob(logprob)}
++            for token, logprob in zip(tokens, logprobs, strict=True)
++        ],
++        finish_reason="stop",
++    )
++    return RequestOutput(request_id, None, [], None, [completion], True)
++
++
++def test_splice_affected_logprobs_rejects_mutation():
++    outputs_by_mode = {
++        "target": [_splice_test_output(f"req-{index}", -0.2) for index in range(10)],
++        "native": [_splice_test_output(f"req-{index}", -0.2) for index in range(10)],
++        "splice": [_splice_test_output(f"req-{index}", -0.5) for index in range(10)],
++    }
++    events = [
++        {
++            "request_id": f"req-{index}",
++            "start": 0,
++            "draft": [10, 20, 31],
++            "accepted": 2,
++            "rejected": True,
++            "prefix_len": 1,
++        }
++        for index in range(10)
++    ]
++    with pytest.raises(AssertionError, match="rejected logprob drift"):
++        check_splice_affected_positions(outputs_by_mode, events)
++
 +
 +@pytest.mark.parametrize("async_scheduling", [False, True], ids=["sync", "async"])
 +@single_gpu_only
@@ -725,11 +1107,21 @@ index 7cbe482761..fa47a99f24 100644
 +        "suffix_decoding_max_tree_depth": 8,
 +        "suffix_decoding_corpus_tokens": 65536,
 +    }
++    native_config = {
++        key: value
++        for key, value in splice_config.items()
++        if not key.startswith("suffix_")
++    }
 +    model = "Qwen/Qwen3-4B-FP8" if current_platform.is_cuda() else "Qwen/Qwen3-4B"
-+    counts = []
-+    for config in (None, splice_config):
++    outputs_by_mode = {}
++    splice_events = []
++    for mode, config in (
++        ("target", None),
++        ("native", native_config),
++        ("splice", splice_config),
++    ):
 +        runner_kwargs = {}
-+        if config is not None:
++        if mode == "splice":
 +            runner_kwargs["worker_extension_cls"] = f"{__name__}.SpliceSamplingProbe"
 +        with vllm_runner(
 +            model,
@@ -743,17 +1135,19 @@ index 7cbe482761..fa47a99f24 100644
 +            max_num_seqs=256,
 +            **runner_kwargs,
 +        ) as runner:
-+            num_samples = 2000
++            num_samples = 1000
 +            params = [
 +                SamplingParams(
 +                    temperature=1.0,
 +                    top_k=3,
 +                    max_tokens=8,
 +                    seed=i,
-+                    logprobs=0,
++                    logprobs=3,
 +                )
 +                for i in range(num_samples)
 +            ]
++            if mode == "splice":
++                runner.llm.collective_rpc("enable_splice_trace")
 +            outputs = runner.get_llm().chat(
 +                [[{"role": "user", "content": "Name a random European capital."}]]
 +                * num_samples,
@@ -761,23 +1155,14 @@ index 7cbe482761..fa47a99f24 100644
 +                use_tqdm=False,
 +                chat_template_kwargs={"enable_thinking": False},
 +            )
-+            first_tokens = []
-+            for output in outputs:
-+                completion = output.outputs[0]
-+                assert completion.token_ids
-+                assert completion.logprobs is not None
-+                first_tokens.append(completion.token_ids[0])
-+                for token_id, logprobs in zip(
-+                    completion.token_ids, completion.logprobs, strict=True
-+                ):
-+                    assert token_id in logprobs
-+                    assert math.isfinite(logprobs[token_id].logprob)
 +            if config is not None:
 +                assert compute_acceptance_rate(runner.get_llm().get_metrics()) > 0
++            if mode == "splice":
 +                _, corpus_observed = runner.llm.collective_rpc("read_splice_state")[0]
 +                assert corpus_observed > 0
-+            counts.append(Counter(first_tokens))
-+    assert_grammar_distribution_unchanged(*counts)
++                splice_events = runner.llm.collective_rpc("read_splice_trace")[0]
++            outputs_by_mode[mode] = outputs
++    check_splice_affected_positions(outputs_by_mode, splice_events)
 +
 +
  def assert_grammar_distribution_unchanged(counts1: Counter[str], counts2: Counter[str]):
@@ -785,10 +1170,10 @@ index 7cbe482761..fa47a99f24 100644
      row1 = [counts1[outcome] for outcome in outcomes]
 diff --git a/tests/v1/spec_decode/test_hybrid_speculator.py b/tests/v1/spec_decode/test_hybrid_speculator.py
 new file mode 100644
-index 0000000000..bfcfd3f83b
+index 0000000000..2bc67d9a56
 --- /dev/null
 +++ b/tests/v1/spec_decode/test_hybrid_speculator.py
-@@ -0,0 +1,345 @@
+@@ -0,0 +1,442 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 +
@@ -1023,6 +1408,103 @@ index 0000000000..bfcfd3f83b
 +    assert last_valid.tolist() == [0, 0]
 +
 +
++@pytest.mark.parametrize(("k", "prefix"), [(1, 1), (1, 2)])
++def test_splice_small_k_clears_stale_candidate(k, prefix):
++    idx_mapping = torch.tensor([2], dtype=torch.int64, device=DEVICE)
++    last_use_suffix = torch.full((3,), True, dtype=torch.bool, device=DEVICE)
++    last_buckets = torch.full((3,), 3, dtype=torch.int32, device=DEVICE)
++    last_valid = torch.full((3,), k, dtype=torch.int32, device=DEVICE)
++    model = torch.tensor([[100]], dtype=torch.int64, device=DEVICE)
++    suffix = torch.tensor([[1000]], dtype=torch.int64, device=DEVICE)
++    model_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
++    suffix_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
++    output = torch.zeros((1, k), dtype=torch.int64, device=DEVICE)
++    _hybrid_route_publish_kernel[(1,)](
++        torch.zeros(1, dtype=torch.int32, device=DEVICE),
++        torch.tensor([4], dtype=torch.int32, device=DEVICE),
++        torch.zeros(1, dtype=torch.int32, device=DEVICE),
++        model,
++        model.stride(0),
++        suffix,
++        suffix.stride(0),
++        model_stats,
++        suffix_stats,
++        torch.zeros(1, dtype=torch.bool, device=DEVICE),
++        idx_mapping,
++        torch.ones(1, dtype=torch.int32, device=DEVICE),
++        0,
++        output,
++        output.stride(0),
++        last_use_suffix,
++        last_buckets,
++        last_valid,
++        MIN_MATCH=4,
++        K=k,
++        STATS_K=3,
++        K_PO2=1,
++        PREFIX=prefix,
++        QUALITY_GATE=False,
++        MIN_EXPECTED=0.0,
++        EXPLORATION_INTERVAL=0,
++    )
++
++    assert output.item() == 100
++    assert not last_use_suffix[2].item()
++    assert last_buckets[2].item() == -1
++    _hybrid_observe_kernel[(1,)](
++        idx_mapping,
++        torch.zeros(1, dtype=torch.bool, device=DEVICE),
++        torch.tensor([2], dtype=torch.int32, device=DEVICE),
++        torch.tensor([1], dtype=torch.int32, device=DEVICE),
++        model_stats,
++        suffix_stats,
++        last_use_suffix,
++        last_buckets,
++        last_valid,
++        K=3,
++        K_PO2=4,
++        PREFIX=prefix,
++    )
++    assert model_stats.sum().item() == 0
++    assert suffix_stats.sum().item() == 0
++    assert last_valid[2].item() == 0
++
++    model = torch.tensor([[100, 101]], dtype=torch.int64, device=DEVICE)
++    suffix = torch.tensor([[1000]], dtype=torch.int64, device=DEVICE)
++    output = torch.zeros((1, 2), dtype=torch.int64, device=DEVICE)
++    _hybrid_route_publish_kernel[(1,)](
++        torch.ones(1, dtype=torch.int32, device=DEVICE),
++        torch.tensor([4], dtype=torch.int32, device=DEVICE),
++        torch.zeros(1, dtype=torch.int32, device=DEVICE),
++        model,
++        model.stride(0),
++        suffix,
++        suffix.stride(0),
++        model_stats,
++        suffix_stats,
++        torch.zeros(1, dtype=torch.bool, device=DEVICE),
++        idx_mapping,
++        torch.ones(1, dtype=torch.int32, device=DEVICE),
++        0,
++        output,
++        output.stride(0),
++        last_use_suffix,
++        last_buckets,
++        last_valid,
++        MIN_MATCH=4,
++        K=2,
++        STATS_K=3,
++        K_PO2=2,
++        PREFIX=1,
++        QUALITY_GATE=False,
++        MIN_EXPECTED=0.0,
++        EXPLORATION_INTERVAL=0,
++    )
++    assert output[0].cpu().tolist() == [100, 1000]
++    assert last_use_suffix[2].item()
++    assert last_buckets[2].item() == 3
++
++
 +def run_suffix_query(
 +    history,
 +    num_tokens,
@@ -1135,7 +1617,7 @@ index 0000000000..bfcfd3f83b
 +            key_mode=mode,
 +        ) == ([30, 31], 2, 4)
 diff --git a/tests/v1/spec_decode/test_suffix_speculator.py b/tests/v1/spec_decode/test_suffix_speculator.py
-index e2f01b752d..bdd44141de 100644
+index e2f01b752d..2adafbcb18 100644
 --- a/tests/v1/spec_decode/test_suffix_speculator.py
 +++ b/tests/v1/spec_decode/test_suffix_speculator.py
 @@ -10,9 +10,10 @@ import torch
@@ -1215,7 +1697,7 @@ index e2f01b752d..bdd44141de 100644
      return drafts.cpu().numpy(), spec.num_valid[:n].cpu().numpy()
  
  
-@@ -467,3 +485,38 @@ def test_reused_slot_does_not_inherit_verification_stats():
+@@ -467,3 +485,101 @@ def test_reused_slot_does_not_inherit_verification_stats():
  def test_short_tree_depth_disables_the_corpus():
      spec, _ = _make(3, 1, 2, 64, corpus_tokens=1024)
      assert not spec.has_corpus
@@ -1228,6 +1710,42 @@ index e2f01b752d..bdd44141de 100644
 +    assert spec._num_scan_blocks(batch, 2) == 1
 +    batch.seq_lens_cpu_upper_bound.fill_(1024)
 +    assert spec._num_scan_blocks(batch, 0) == 4
++
++
++@pytest.mark.parametrize("adaptive", [False, True], ids=["fixed", "adaptive-budget"])
++def test_standalone_scan_covers_sampled_token_at_block_boundary(adaptive):
++    spec, req_states = _make(2, 8, 1, 257, corpus_tokens=0, adaptive=adaptive)
++    tokens = [0] * 257
++    tokens[9] = 1
++    tokens[10] = 7
++    tokens[11] = 42
++    tokens[126] = 1
++    tokens[127] = 7
++    tokens[128] = 7
++    req_states.all_token_ids.gpu[0] = torch.tensor(tokens, device=DEVICE)
++    req_states.total_len.gpu[0] = 129
++    req_states.prompt_len.np[0] = 0
++    batch = InputBatch.make_dummy(1, 32, InputBuffers(1, 257, device=DEVICE))
++    batch.seq_lens_cpu_upper_bound.fill_(128)
++
++    assert spec._num_scan_blocks(batch, 0) == 2
++    drafts = spec.propose(
++        batch,
++        None,
++        None,
++        None,
++        None,
++        torch.ones(1, dtype=torch.int32, device=DEVICE),
++        torch.zeros(1, dtype=torch.int32, device=DEVICE),
++        torch.tensor([[7]], dtype=torch.int64, device=DEVICE),
++        None,
++        None,
++        None,
++    )
++
++    assert drafts[0, 0].item() == 7
++    assert spec.num_valid[0].item() == 1
++    assert spec.match_lens[0].item() == 1
 +
 +
 +def test_scan_blocks_ignore_stale_scratch():
@@ -1245,15 +1763,42 @@ index e2f01b752d..bdd44141de 100644
 +
 +
 +def test_corpus_ingestion_uses_scheduler_trimmed_length():
-+    spec, req_states = _make(3, 8, 1, 64, corpus_tokens=1024)
++    spec, req_states = _make(3, 8, 2, 64, corpus_tokens=1024)
 +    _set(req_states, 0, [1, 2], [7, 8, 9, 10])
-+    req_states.req_id_to_index = {"done": 0}
++    _set(req_states, 1, [3], [30, 31])
++    req_states.req_id_to_index = {"done": 0, "fallback": 1}
 +
-+    spec.on_requests_finished_with_lengths(["done"], {"done": 4})
++    spec.on_requests_finished_with_lengths(["fallback", "done"], {"done": 4})
 +
-+    assert spec.corpus[:5].cpu().tolist() == [1, 2, 7, 8, -1]
++    assert spec.corpus[:9].cpu().tolist() == [
++        1,
++        2,
++        7,
++        8,
++        -1,
++        3,
++        30,
++        31,
++        -1,
++    ]
 +    assert 9 not in spec.corpus
 +    assert 10 not in spec.corpus
++
++
++def test_corpus_excludes_front_end_stopped_requests():
++    spec, req_states = _make(3, 8, 2, 64, corpus_tokens=1024)
++    _set(req_states, 0, [1, 2], [7, 8, 9])
++    _set(req_states, 1, [3], [30, 31])
++    req_states.req_id_to_index = {"stop": 0, "normal": 1}
++
++    spec.on_requests_finished_with_lengths(
++        ["stop", "normal"], {"stop": 4}, excluded_req_ids={"stop"}
++    )
++
++    assert spec.num_docs == 1
++    assert spec.corpus[:4].cpu().tolist() == [3, 30, 31, -1]
++    assert 7 not in spec.corpus
++    assert 8 not in spec.corpus
 diff --git a/tests/v1/spec_decode/utils.py b/tests/v1/spec_decode/utils.py
 index 99b1f311d6..ee2645bfa7 100644
 --- a/tests/v1/spec_decode/utils.py
@@ -1423,15 +1968,17 @@ index 6f2919855d..f51efa695f 100644
                  raise ValueError(
                      "Speculative decoding with watermarking requires "
 diff --git a/vllm/v1/core/sched/output.py b/vllm/v1/core/sched/output.py
-index 4c46c6c2de..1d7963233d 100644
+index 4c46c6c2de..f9964c2aee 100644
 --- a/vllm/v1/core/sched/output.py
 +++ b/vllm/v1/core/sched/output.py
-@@ -285,9 +285,15 @@ class SchedulerOutput:
+@@ -285,9 +285,17 @@ class SchedulerOutput:
      # Only used for v2 model runner.
      preempted_req_ids: set[str] | None = None
  
 +    # Final scheduler-trimmed lengths for suffix-corpus ingestion.
 +    finished_req_token_lengths: dict[str, int] = field(default_factory=dict)
++    # Requests whose output boundaries are unsafe for suffix-corpus ingestion.
++    suffix_corpus_excluded_req_ids: set[str] = field(default_factory=set)
 +
      # Whether any of the scheduled requests use structured output.
      # Set only in async scheduling case.
@@ -1443,18 +1990,19 @@ index 4c46c6c2de..1d7963233d 100644
      # Whether any scheduled request uses structured output with speculative
      # decoding. Set only in async scheduling case.
 diff --git a/vllm/v1/core/sched/scheduler.py b/vllm/v1/core/sched/scheduler.py
-index 0373c64773..77c1aa03dc 100644
+index 0373c64773..bf4f63891b 100644
 --- a/vllm/v1/core/sched/scheduler.py
 +++ b/vllm/v1/core/sched/scheduler.py
-@@ -255,6 +255,7 @@ class Scheduler(SchedulerInterface):
+@@ -255,6 +255,8 @@ class Scheduler(SchedulerInterface):
          # requests so that they can free the cached states for those requests.
          # This is flushed at the end of each scheduling step.
          self.finished_req_ids: set[str] = set()
 +        self.finished_req_token_lengths: dict[str, int] = {}
++        self.finished_req_corpus_excluded_ids: set[str] = set()
  
          # IDs of requests preempted since the last call to schedule().
          self.reset_preempted_req_ids: set[str] = set()
-@@ -1755,6 +1756,11 @@ class Scheduler(SchedulerInterface):
+@@ -1755,6 +1757,11 @@ class Scheduler(SchedulerInterface):
                  len(num_scheduled_tokens)
              ]
  
@@ -1466,15 +2014,18 @@ index 0373c64773..77c1aa03dc 100644
          scheduler_output = SchedulerOutput(
              scheduled_new_reqs=new_reqs_data,
              scheduled_cached_reqs=cached_reqs_data,
-@@ -1769,6 +1775,7 @@ class Scheduler(SchedulerInterface):
+@@ -1769,6 +1776,10 @@ class Scheduler(SchedulerInterface):
              # It contains the request IDs that are finished in between
              # the previous and the current steps.
              finished_req_ids=self.finished_req_ids,
 +            finished_req_token_lengths=finished_req_token_lengths,
++            suffix_corpus_excluded_req_ids=(
++                self.finished_req_corpus_excluded_ids & self.finished_req_ids
++            ),
              free_encoder_mm_hashes=self.encoder_cache_manager.get_freed_mm_hashes(),
              encoder_input_updates=self._get_encoder_input_updates(
                  num_scheduled_tokens, new_reqs_data, scheduled_encoder_inputs
-@@ -1900,6 +1907,8 @@ class Scheduler(SchedulerInterface):
+@@ -1900,6 +1911,8 @@ class Scheduler(SchedulerInterface):
              scheduler_output.has_structured_output_requests |= (
                  request.use_structured_output and not request.is_prefill_chunk
              )
@@ -1483,17 +2034,35 @@ index 0373c64773..77c1aa03dc 100644
              # Drop from the in-flight-prefill set once it's no longer prefilling.
              if not request.is_prefill_chunk:
                  self._inflight_prefills.discard(request)
-@@ -2582,8 +2591,10 @@ class Scheduler(SchedulerInterface):
+@@ -1913,6 +1926,7 @@ class Scheduler(SchedulerInterface):
+         # NOTE: We shouldn't just clear() here because it will also affect
+         # the scheduler output.
+         self.finished_req_ids = set()
++        self.finished_req_corpus_excluded_ids = set()
+         self.reset_preempted_req_ids = set()
+ 
+     def _update_request_as_session(
+@@ -2582,8 +2596,12 @@ class Scheduler(SchedulerInterface):
                  # Capture finish_reason BEFORE _handle_stopped_request, which may
                  # reset the status to WAITING for streaming requests that continue.
                  finish_reason = request.get_finished_reason()
 +                final_token_length = request.num_tokens
                  finished = self._handle_stopped_request(request)
                  if finished:
++                    if request.sampling_params.stop:
++                        self.finished_req_corpus_excluded_ids.add(req_id)
 +                    self.finished_req_token_lengths[req_id] = final_token_length
                      kv_transfer_params, ec_transfer_params = self._free_request(request)
                      if (
                          prefill_stats is not None
+@@ -3210,6 +3228,7 @@ class Scheduler(SchedulerInterface):
+                 self.finished_recving_kv_req_ids.discard(request.request_id)
+                 self.failed_recving_kv_req_ids.discard(request.request_id)
+ 
++            self.finished_req_corpus_excluded_ids.add(request.request_id)
+             request.status = finished_status
+             self._free_request(request, delay_free_blocks=delay_free_blocks)
+             if delay_free_blocks:
 diff --git a/vllm/v1/worker/gpu/input_batch.py b/vllm/v1/worker/gpu/input_batch.py
 index f5ca37a714..fc8dfab409 100644
 --- a/vllm/v1/worker/gpu/input_batch.py
@@ -1516,7 +2085,7 @@ index f5ca37a714..fc8dfab409 100644
      @classmethod
      def make_dummy(
 diff --git a/vllm/v1/worker/gpu/model_runner.py b/vllm/v1/worker/gpu/model_runner.py
-index 1f831da6ff..68c23bb6bc 100644
+index 1f831da6ff..994c19a344 100644
 --- a/vllm/v1/worker/gpu/model_runner.py
 +++ b/vllm/v1/worker/gpu/model_runner.py
 @@ -291,9 +291,12 @@ class GPUModelRunner(LoRAModelRunnerMixin):
@@ -1550,25 +2119,29 @@ index 1f831da6ff..68c23bb6bc 100644
  
              self.use_aux_hidden_state_outputs = (
                  self.speculative_config.uses_aux_hidden_states
-@@ -1283,7 +1288,16 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+@@ -1283,7 +1288,20 @@ class GPUModelRunner(LoRAModelRunnerMixin):
              # Preempted docs keep their query-use reservation until rescheduled.
              self.pooling_runner.on_requests_finished(finished_req_ids)
          if self.speculator is not None and finished_req_ids:
 -            self.speculator.on_requests_finished(finished_req_ids)
 +            if hasattr(self.speculator, "on_requests_finished_with_lengths"):
 +                self.speculator.on_requests_finished_with_lengths(
-+                    finished_req_ids, scheduler_output.finished_req_token_lengths
++                    finished_req_ids,
++                    scheduler_output.finished_req_token_lengths,
++                    excluded_req_ids=scheduler_output.suffix_corpus_excluded_req_ids,
 +                )
 +            else:
 +                self.speculator.on_requests_finished(finished_req_ids)
 +        if self.splice is not None and finished_req_ids:
 +            self.splice.on_requests_finished_with_lengths(
-+                finished_req_ids, scheduler_output.finished_req_token_lengths
++                finished_req_ids,
++                scheduler_output.finished_req_token_lengths,
++                excluded_req_ids=scheduler_output.suffix_corpus_excluded_req_ids,
 +            )
          preempted_req_ids = scheduler_output.preempted_req_ids
          if preempted_req_ids:
              finished_req_ids = finished_req_ids.union(preempted_req_ids)
-@@ -1329,6 +1343,8 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+@@ -1329,6 +1347,8 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                  self.adaptive_verification.add_request(req_index)
              if self.speculator is not None:
                  self.speculator.add_request(req_index, new_req_data)
@@ -1577,7 +2150,7 @@ index 1f831da6ff..68c23bb6bc 100644
  
              if self.pooling_runner is not None:
                  assert new_req_data.pooling_params is not None
-@@ -1680,6 +1696,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+@@ -1680,6 +1700,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
              cu_num_logits=cu_num_logits,
              cu_num_logits_np=cu_num_logits_np,
              has_structured_output_reqs=scheduler_output.has_structured_output_requests,
@@ -1585,7 +2158,7 @@ index 1f831da6ff..68c23bb6bc 100644
              prompt_lens=prompt_lens,
              fast_prefill=fast_prefill,
              max_query_len=(
-@@ -2420,6 +2437,8 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+@@ -2420,6 +2441,8 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                  self.speculator.prepare_propose(
                      input_batch, num_sampled, num_rejected, self.sampler
                  )
@@ -1594,7 +2167,7 @@ index 1f831da6ff..68c23bb6bc 100644
              spec_hidden_states = get_drafter_hidden_states(
                  self.model, draft_hidden_states
              )
-@@ -2440,10 +2459,20 @@ class GPUModelRunner(LoRAModelRunnerMixin):
+@@ -2440,10 +2463,20 @@ class GPUModelRunner(LoRAModelRunnerMixin):
                      dp_sync_state=dp_sync_state,
                      mm_inputs=mm_inputs,
                  )
@@ -1657,10 +2230,10 @@ index 0000000000..208f01a7cb
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 diff --git a/vllm/v1/worker/gpu/spec_decode/hybrid/speculator.py b/vllm/v1/worker/gpu/spec_decode/hybrid/speculator.py
 new file mode 100644
-index 0000000000..25942fc2aa
+index 0000000000..0eb0e62002
 --- /dev/null
 +++ b/vllm/v1/worker/gpu/spec_decode/hybrid/speculator.py
-@@ -0,0 +1,378 @@
+@@ -0,0 +1,379 @@
 +# SPDX-License-Identifier: Apache-2.0
 +# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 +
@@ -1790,7 +2363,8 @@ index 0000000000..25942fc2aa
 +    select = select & different_tail
 +
 +    valid = (
-+        (tl.load(num_valid_ptr + b) >= required)
++        (required > 0)
++        & (tl.load(num_valid_ptr + b) >= required)
 +        & (match_len >= MIN_MATCH)
 +        & prefix_valid
 +    )
@@ -1908,9 +2482,10 @@ index 0000000000..25942fc2aa
 +        self,
 +        finished_req_ids: "Iterable[str]",
 +        final_token_lengths: dict[str, int],
++        excluded_req_ids: "Iterable[str] | None" = None,
 +    ) -> None:
 +        self.suffix.on_requests_finished_with_lengths(
-+            finished_req_ids, final_token_lengths
++            finished_req_ids, final_token_lengths, excluded_req_ids=excluded_req_ids
 +        )
 +
 +    def reset_state(self) -> None:
@@ -2025,7 +2600,6 @@ index 0000000000..25942fc2aa
 +            self.last_valid[input_batch.idx_mapping] = 0
 +            return model_drafts
 +        if k <= self.prefix_len:
-+            self.suffix.num_valid[: input_batch.num_reqs].zero_()
 +            return self._publish(
 +                input_batch, model_drafts, model_drafts, num_sampled, k
 +            )
@@ -2090,10 +2664,25 @@ index 5e6f016d25..94e049187e 100644
 -            )
 +        validate_suffix_decoding_parameters(spec)
 diff --git a/vllm/v1/worker/gpu/spec_decode/suffix/speculator.py b/vllm/v1/worker/gpu/spec_decode/suffix/speculator.py
-index 90ab284621..89eacf7cde 100644
+index 90ab284621..8c00608eeb 100644
 --- a/vllm/v1/worker/gpu/spec_decode/suffix/speculator.py
 +++ b/vllm/v1/worker/gpu/spec_decode/suffix/speculator.py
-@@ -77,9 +77,16 @@ def _suffix_local_scan_kernel(
+@@ -15,9 +15,11 @@ Extends the n-gram speculator with the two parts of SuffixDecoding
+   matching.
+ 
+ The propose path never synchronizes with the host. Ingestion reads token
+-history and lengths directly from `RequestState` and processes finished
+-requests in sorted id order; index updates are order-independent, so every
+-TP rank holds an identical corpus without any collective.
++history from `RequestState`, using scheduler-provided final lengths when
++available and the device history length otherwise. The scheduler excludes
++string-stop and externally aborted requests from corpus ingestion. Remaining
++requests are processed in sorted id order; index updates are order-independent,
++so every TP rank holds an identical corpus without any collective.
+ """
+ 
+ from __future__ import annotations
+@@ -77,9 +79,16 @@ def _suffix_local_scan_kernel(
      idx_mapping_ptr,  # *int32  [B]  batch_idx -> req_state_idx
      total_len_ptr,  # *int32  [max_num_reqs]
      num_sampled_ptr,  # *int32  [B]
@@ -2110,7 +2699,7 @@ index 90ab284621..89eacf7cde 100644
      MAX_DEPTH: tl.constexpr,
      BLOCK: tl.constexpr,
  ):
-@@ -97,35 +104,66 @@ def _suffix_local_scan_kernel(
+@@ -97,35 +106,66 @@ def _suffix_local_scan_kernel(
      row = token_ids_ptr + req * token_ids_stride
  
      scratch_off = b * scratch_stride + blk
@@ -2181,7 +2770,7 @@ index 90ab284621..89eacf7cde 100644
      HASH_MUL: tl.constexpr,
      NUM_BUCKETS: tl.constexpr,
      SLOTS: tl.constexpr,
-@@ -133,6 +171,7 @@ def _corpus_draft(
+@@ -133,6 +173,7 @@ def _corpus_draft(
      DEPTH_PO2: tl.constexpr,
      K: tl.constexpr,
      K_PO2: tl.constexpr,
@@ -2189,7 +2778,7 @@ index 90ab284621..89eacf7cde 100644
  ):
      """(match_len, draft, num_tokens) from the corpus for one request.
  
-@@ -144,27 +183,46 @@ def _corpus_draft(
+@@ -144,27 +185,46 @@ def _corpus_draft(
      (prefix-consistent; ties go to the newest candidate), and the chain with
      the highest sum of per-token probabilities wins (ties: longer L).
      """
@@ -2243,7 +2832,7 @@ index 90ab284621..89eacf7cde 100644
      )
      vals = tl.load(table_ptr + slot)
      cpos = vals & 0xFFFFFFFF
-@@ -178,7 +236,13 @@ def _corpus_draft(
+@@ -178,7 +238,13 @@ def _corpus_draft(
      miss = (src != tail[None, :]).to(tl.int32)
      c_len = tl.sum((tl.cumsum(miss, axis=1) == 0).to(tl.int64), axis=1)
      nxt = tl.load(corpus_ptr + cpos, mask=(vals >= 0) & (cpos < corpus_len), other=-1)
@@ -2258,7 +2847,7 @@ index 90ab284621..89eacf7cde 100644
      # Both buckets often hold the same position; count it once.
      dup = (
          (cpos[:, None] == cpos[None, :])
-@@ -195,6 +259,9 @@ def _corpus_draft(
+@@ -195,6 +261,9 @@ def _corpus_draft(
          other=-1,
      ).to(tl.int64)
      cont = tl.where(tl.cumsum((cont < 0).to(tl.int32), axis=1) == 0, cont, -1)
@@ -2268,7 +2857,7 @@ index 90ab284621..89eacf7cde 100644
  
      # Candidates sharing a match length draft identical chains; score each
      # distinct length once.
-@@ -205,6 +272,14 @@ def _corpus_draft(
+@@ -205,6 +274,14 @@ def _corpus_draft(
      )
      first = ok & (tl.max(same_len.to(tl.int32), axis=0) == 0)
  
@@ -2283,11 +2872,10 @@ index 90ab284621..89eacf7cde 100644
      # A token's probability is its vote count over the candidates still
      # alive, which is the previous token's count, so a chain's score
      # telescopes to (sum of its vote counts) / (candidates at the start).
-@@ -251,6 +326,118 @@ def _corpus_draft(
-     return best_len, best_chain, best_n
+@@ -252,12 +329,125 @@ def _corpus_draft(
  
  
-+@triton.jit
+ @triton.jit
 +def _corpus_draft(
 +    row,
 +    seq_len,
@@ -2399,10 +2987,10 @@ index 90ab284621..89eacf7cde 100644
 +    )
 +
 +
- @triton.jit
++@triton.jit(do_not_specialize=["num_blocks"])
  def _suffix_finalize_kernel(
      token_ids_ptr,  # *int32  [max_num_reqs, token_ids_stride]
-@@ -258,6 +445,7 @@ def _suffix_finalize_kernel(
+     token_ids_stride,
      idx_mapping_ptr,  # *int32  [B]
      total_len_ptr,  # *int32  [max_num_reqs]
      num_sampled_ptr,  # *int32  [B]
@@ -2410,7 +2998,7 @@ index 90ab284621..89eacf7cde 100644
      last_sampled_ptr,  # *int64  [max_num_reqs]
      scratch_ptr,  # *int64  [B, scratch_stride]
      scratch_stride,
-@@ -267,13 +455,22 @@ def _suffix_finalize_kernel(
+@@ -267,13 +457,22 @@ def _suffix_finalize_kernel(
      corpus_len,
      table_ptr,  # *int64  [2, NUM_BUCKETS, SLOTS]
      drafts_ptr,  # *int64  [B, K]  (output)
@@ -2433,7 +3021,7 @@ index 90ab284621..89eacf7cde 100644
      HASH_MUL: tl.constexpr,
      NUM_BUCKETS: tl.constexpr,
      SLOTS: tl.constexpr,
-@@ -282,6 +479,7 @@ def _suffix_finalize_kernel(
+@@ -282,6 +481,7 @@ def _suffix_finalize_kernel(
      K: tl.constexpr,
      K_PO2: tl.constexpr,
      NB_PO2: tl.constexpr,
@@ -2441,7 +3029,7 @@ index 90ab284621..89eacf7cde 100644
  ):
      b = tl.program_id(0).to(tl.int64)
      req = tl.load(idx_mapping_ptr + b).to(tl.int64)
-@@ -289,6 +487,25 @@ def _suffix_finalize_kernel(
+@@ -289,6 +489,25 @@ def _suffix_finalize_kernel(
      num_sampled = tl.load(num_sampled_ptr + b)
      last_tok = tl.load(last_sampled_ptr + req)
      row = token_ids_ptr + req * token_ids_stride
@@ -2467,7 +3055,7 @@ index 90ab284621..89eacf7cde 100644
  
      # Best match in the request's own history.
      nb = tl.arange(0, NB_PO2).to(tl.int64)
-@@ -299,33 +516,42 @@ def _suffix_finalize_kernel(
+@@ -299,33 +518,42 @@ def _suffix_finalize_kernel(
      l_len = l_score // Lp1
      l_pos = l_score - l_len * Lp1
  
@@ -2532,7 +3120,7 @@ index 90ab284621..89eacf7cde 100644
      else:
          match_len = l_len
          source = tl.zeros((), tl.int64)
-@@ -335,8 +561,10 @@ def _suffix_finalize_kernel(
+@@ -335,8 +563,10 @@ def _suffix_finalize_kernel(
      # Invalid slots fall back to the last sampled token; they are verified as
      # ordinary (rejectable) drafts, so the fill value only affects efficiency.
      out = tl.where(draft_ok, draft, last_tok)
@@ -2544,7 +3132,60 @@ index 90ab284621..89eacf7cde 100644
  
      if ADAPTIVE:
          # Per-position confidence for adaptive verification: the observed
-@@ -515,6 +743,9 @@ class SuffixSpeculator(BaseSpeculator):
+@@ -397,7 +627,7 @@ def _suffix_observe_kernel(
+ def _suffix_ingest_kernel(
+     token_ids_ptr,  # *int32  [max_num_reqs, token_ids_stride]
+     token_ids_stride,
+-    docs_ptr,  # *int32  [F, 2]  (slot, start) of finished requests, sorted
++    docs_ptr,  # *int32  [F, 3]  (slot, start, final length), sorted
+     num_docs,
+     total_len_ptr,  # *int32  [max_num_reqs]
+     corpus_ptr,  # *int32  [corpus_len]
+@@ -428,20 +658,22 @@ def _suffix_ingest_kernel(
+     f = tl.program_id(0).to(tl.int64)
+     blk = tl.program_id(1).to(tl.int64)
+     cap = tl.cast(corpus_len, tl.int64)
+-    req = tl.load(docs_ptr + 2 * f).to(tl.int64)
+-    end = tl.load(total_len_ptr + req).to(tl.int64)
++    req = tl.load(docs_ptr + 3 * f).to(tl.int64)
++    end = tl.load(docs_ptr + 3 * f + 2).to(tl.int64)
++    end = tl.where(end >= 0, end, tl.load(total_len_ptr + req).to(tl.int64))
+     # Keep the newest cap - 1 tokens of an over-long response.
+-    start = tl.maximum(tl.load(docs_ptr + 2 * f + 1).to(tl.int64), end - (cap - 1))
++    start = tl.maximum(tl.load(docs_ptr + 3 * f + 1).to(tl.int64), end - (cap - 1))
+     n = tl.maximum(end - start, 0)
+     # Block 0 also writes the separator.
+     if (blk > 0) & (blk * BLOCK >= n):
+         return
+     head = tl.load(head_ptr)
+     for i in range(f):
+-        req_i = tl.load(docs_ptr + 2 * i).to(tl.int64)
+-        end_i = tl.load(total_len_ptr + req_i).to(tl.int64)
++        req_i = tl.load(docs_ptr + 3 * i).to(tl.int64)
++        end_i = tl.load(docs_ptr + 3 * i + 2).to(tl.int64)
++        end_i = tl.where(end_i >= 0, end_i, tl.load(total_len_ptr + req_i).to(tl.int64))
+         start_i = tl.maximum(
+-            tl.load(docs_ptr + 2 * i + 1).to(tl.int64), end_i - (cap - 1)
++            tl.load(docs_ptr + 3 * i + 1).to(tl.int64), end_i - (cap - 1)
+         )
+         n_i = tl.maximum(end_i - start_i, 0)
+         head = tl.where(head + n_i + 1 > cap, 0, head) + n_i + 1
+@@ -456,10 +688,11 @@ def _suffix_ingest_kernel(
+     keep_sep = sep >= 0
+     later = head + n + 1
+     for g in range(f + 1, num_docs):
+-        req_g = tl.load(docs_ptr + 2 * g).to(tl.int64)
+-        end_g = tl.load(total_len_ptr + req_g).to(tl.int64)
++        req_g = tl.load(docs_ptr + 3 * g).to(tl.int64)
++        end_g = tl.load(docs_ptr + 3 * g + 2).to(tl.int64)
++        end_g = tl.where(end_g >= 0, end_g, tl.load(total_len_ptr + req_g).to(tl.int64))
+         start_g = tl.maximum(
+-            tl.load(docs_ptr + 2 * g + 1).to(tl.int64), end_g - (cap - 1)
++            tl.load(docs_ptr + 3 * g + 1).to(tl.int64), end_g - (cap - 1)
+         )
+         n_g = tl.maximum(end_g - start_g, 0)
+         later = tl.where(later + n_g + 1 > cap, 0, later)
+@@ -515,6 +748,9 @@ class SuffixSpeculator(BaseSpeculator):
          self.device = device
          self.req_states = req_states
          self.num_speculative_steps: int = spec.num_speculative_tokens
@@ -2554,7 +3195,7 @@ index 90ab284621..89eacf7cde 100644
          self.max_depth: int = spec.suffix_decoding_max_tree_depth
          self.max_num_reqs: int = vllm_config.scheduler_config.max_num_seqs
          self.max_model_len: int = vllm_config.model_config.max_model_len
-@@ -576,6 +807,10 @@ class SuffixSpeculator(BaseSpeculator):
+@@ -576,6 +812,10 @@ class SuffixSpeculator(BaseSpeculator):
          self.num_valid = torch.zeros(
              self.max_num_reqs, dtype=torch.int32, device=device
          )
@@ -2565,42 +3206,61 @@ index 90ab284621..89eacf7cde 100644
  
          # Adaptive verification (optional): per-slot confidences from
          # acceptance statistics learned online.
-@@ -625,6 +860,11 @@ class SuffixSpeculator(BaseSpeculator):
+@@ -625,6 +865,14 @@ class SuffixSpeculator(BaseSpeculator):
          return None
  
      def on_requests_finished(self, finished_req_ids: Iterable[str]) -> None:
 +        self.on_requests_finished_with_lengths(finished_req_ids, {})
 +
 +    def on_requests_finished_with_lengths(
-+        self, finished_req_ids: Iterable[str], final_token_lengths: dict[str, int]
++        self,
++        finished_req_ids: Iterable[str],
++        final_token_lengths: dict[str, int],
++        excluded_req_ids: Iterable[str] | None = None,
 +    ) -> None:
          """Add finished responses to the corpus before their slots are freed."""
          if not self.has_corpus:
              return
-@@ -655,6 +895,13 @@ class SuffixSpeculator(BaseSpeculator):
+@@ -635,6 +883,8 @@ class SuffixSpeculator(BaseSpeculator):
+         # this kernel runs.
+         docs = []
+         for req_id in sorted(finished_req_ids):
++            if excluded_req_ids is not None and req_id in excluded_req_ids:
++                continue
+             slot = req_states.req_id_to_index.get(req_id)
+             if slot is None:
+                 continue
+@@ -642,10 +892,10 @@ class SuffixSpeculator(BaseSpeculator):
+             # assistant header) so the first response tokens are indexed by
+             # the tokens that precede them.
+             start = max(int(req_states.prompt_len.np[slot]) - _PROMPT_CONTEXT, 0)
+-            docs += [slot, start]
++            docs += [slot, start, final_token_lengths.get(req_id, -1)]
+         if not docs:
+             return
+-        num_docs = len(docs) // 2
++        num_docs = len(docs) // 3
+         if self.num_docs + num_docs >= 1 << 31:
+             # Index entries pack doc_seq into 31 bits; start a new index (the
+             # corpus tokens stay, only their entries are dropped).
+@@ -655,6 +905,7 @@ class SuffixSpeculator(BaseSpeculator):
          self.num_docs += num_docs
          docs_gpu = async_tensor_h2d(docs, self.device, torch.int32)
          token_ids = self.req_states.all_token_ids.gpu
-+        ingest_end = req_states.total_len.gpu
-+        if final_token_lengths:
-+            ingest_end = ingest_end.clone()
-+            for req_id, final_len in final_token_lengths.items():
-+                slot = req_states.req_id_to_index.get(req_id)
-+                if slot is not None:
-+                    ingest_end[slot] = final_len
++        total_len = req_states.total_len.gpu
          _suffix_ingest_kernel[
              (num_docs, triton.cdiv(self.max_model_len, _INGEST_BLOCK))
          ](
-@@ -662,7 +909,7 @@ class SuffixSpeculator(BaseSpeculator):
+@@ -662,7 +913,7 @@ class SuffixSpeculator(BaseSpeculator):
              token_ids.stride(0),
              docs_gpu,
              num_docs,
 -            req_states.total_len.gpu,
-+            ingest_end,
++            total_len,
              self.corpus,
              self.corpus_len,
              self.corpus_head,
-@@ -679,6 +926,97 @@ class SuffixSpeculator(BaseSpeculator):
+@@ -679,6 +930,101 @@ class SuffixSpeculator(BaseSpeculator):
          self.corpus_head.copy_(self.ingest_out[0:1])
          self.doc_seq.copy_(self.ingest_out[1:2])
  
@@ -2608,7 +3268,10 @@ index 90ab284621..89eacf7cde 100644
 +        max_history_len = int(
 +            input_batch.seq_lens_cpu_upper_bound[: input_batch.num_reqs].max().item()
 +        )
-+        active_len = min(self.max_model_len, max_history_len + prefix_len)
++        sampled_margin = int(prefix_len == 0)
++        active_len = min(
++            self.max_model_len, max_history_len + prefix_len + sampled_margin
++        )
 +        return triton.cdiv(max(active_len, 1), self.block_l)
 +
 +    def _query(
@@ -2689,7 +3352,8 @@ index 90ab284621..89eacf7cde 100644
 +            DEPTH_PO2=triton.next_power_of_2(self.max_depth),
 +            K=num_tokens,
 +            K_PO2=max(1, triton.next_power_of_2(num_tokens)),
-+            NB_PO2=max(1, triton.next_power_of_2(num_scan_blocks)),
++            # Keep the JIT signature stable; num_scan_blocks masks stale slots.
++            NB_PO2=max(1, triton.next_power_of_2(self.n_blocks)),
 +            KEY_MODE=self.corpus_key_mode if require_full else 0,
 +            num_warps=4,
 +        )
@@ -2698,7 +3362,7 @@ index 90ab284621..89eacf7cde 100644
      @torch.inference_mode()
      def propose(
          self,
-@@ -704,8 +1042,6 @@ class SuffixSpeculator(BaseSpeculator):
+@@ -704,8 +1050,6 @@ class SuffixSpeculator(BaseSpeculator):
          if dummy_run:
              return self.drafts[:num_reqs]
  
@@ -2707,7 +3371,7 @@ index 90ab284621..89eacf7cde 100644
          idx_mapping = input_batch.idx_mapping
          k_po2 = max(1, triton.next_power_of_2(self.num_speculative_steps))
  
-@@ -729,49 +1065,40 @@ class SuffixSpeculator(BaseSpeculator):
+@@ -729,49 +1073,40 @@ class SuffixSpeculator(BaseSpeculator):
              if self.num_steps % _STATS_HALF_LIFE == 0:
                  self.accept_stats.bitwise_right_shift_(1)
  

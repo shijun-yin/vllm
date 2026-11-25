@@ -154,6 +154,48 @@ warmup 前后的 splice token 哈希仍完全一致，因此 warmup 改变了 JI
 hot-1/2 为 6.167/5.946 s，与 verbose 轮一致；相对同一 pure 基线，Blazedit、Coding、
 RAG 分别为 **+14.82%、+3.75%、+19.41%**。详见 `coding_fixednb_summary.md`。
 
+## 最新遗留边界与 R4 覆盖闭合
+
+2026-11-26 的代码在上一节基础上补齐独立 suffix 采样后扫描边界、动态小宽度反馈资格，
+以及字符串 stop/外部取消请求的跨请求 corpus 排除。正常 EOS、stop token 和 max tokens
+仍可入库；相应产品文档和 scheduler 回归已同步。自适应验证的草稿预算再分配不会改变
+每请求已验证 token 数，因此独立 suffix 的采样余量保持为 1，不需要额外倾斜余量。
+
+R4 贪心检查改为覆盖完整 token 序列和逐位置 logprob。非零温度真实换尾探针分别覆盖
+suffix 接受位置和替换尾部首次拒绝位置；logprob 对照使用同一已提交前缀下实际生成的
+纠正 token，而不是已被拒绝、不会作为普通输出返回的 suffix token。sync/async 分别
+`1 passed in 115.44s`、`1 passed in 119.77s`，故意扰动回归通过。原始输出保存为
+`reviewfix_r4_sync.log` 和 `reviewfix_r4_async.log`。
+
+本轮 suffix/hybrid kernel 为 47/47，通过 scheduler 套件为 306 passed、3 deselected，
+standard DFlash 完整 token/logprob E2E 为 1 passed in 101.12s；字符串 stop E2E 已确认
+即使设备历史含有客户端不可见尾部，该请求也不会进入共享 corpus，普通请求仍可入库。
+10 个变更 Python 文件的 Ruff、格式
+及差异空白检查通过。分布式 PP/PCP 和 H20 最终提交复测不在本地单卡覆盖范围内。
+
+### 最终提交的 RTX 4070 同期配对
+
+代码提交为 `615057195c71e0dee4080d273c62bc8868015a99`。使用标准 DFlash K=15、j=1、
+B4、64K corpus、temperature=0.8、自然 EOS；每类 16 条请求，每波最多 384 token。
+每个数据集先独立 warmup 并清空状态，再执行 cold、hot-1、hot-2。第一轮为
+pure→splice，第二轮为 splice→pure，四个进程均关闭分段打点。下表吞吐为两轮 hot
+合计输出 token 除以合计时间，纯/splice 平均接受量分别为 AL P/S。
+
+| 数据集 | 第一轮 pure/splice tok/s | 第一轮 Delta | 第二轮 pure/splice tok/s | 第二轮 Delta | AL P/S |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Blazedit | 742.92 / 847.82 | +14.12% | 742.96 / 847.62 | +14.09% | 6.885 / 8.783 |
+| SPEED Coding | 955.40 / 993.93 | +4.03% | 955.68 / 993.39 | +3.95% | 4.566 / 4.839 |
+| SPEED RAG | 368.68 / 444.10 | +20.46% | 369.16 / 444.34 | +20.36% | 1.922 / 2.568 |
+
+两组 pure 和 splice 的逐请求 token 哈希、投机计数分别完全一致，组间吞吐差均小于
+0.2%。两组 splice 与上一版固定 JIT 结果的所有 cold/hot token 哈希也一致，hot 波次
+耗时差在约 0.7% 内。Coding hot-1/hot-2 第一轮为 6.185/5.967 s，第二轮为
+6.187/5.971 s，未复现旧版约 8 s 的执行空泡，也不再出现 −10% 到 +3% 的配对波动。
+当前证据支持本地 B4 稳定收益，但不外推到 H20、DFlash2 或更高实际并发。
+
+原始文件为 `reviewfix_pair1_pure.{json,log}`、`reviewfix_pair1_splice.{json,log}`、
+`reviewfix_pair2_splice.{json,log}`、`reviewfix_pair2_pure.{json,log}`。
+
 ## 文件
 
 - `environment.txt`：H20 型号、显存、系统、磁盘与代码状态。
