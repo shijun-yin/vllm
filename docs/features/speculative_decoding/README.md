@@ -117,7 +117,10 @@ feedback. Lookup scans are bounded by the current batch's history-length upper
 bound, not just `max_model_len`. Rows without newly sampled tokens, empty
 corpora, blocks without a full continuation, and locally maximal matches skip
 avoidable work. Finished-request corpus ingestion uses the scheduler's final
-trimmed token length, carried with the next completion notification. Set
+trimmed token length, carried with the next completion notification. Requests
+using string `stop` and aborted requests are excluded from the shared corpus so
+front-end-trimmed tokens cannot become other requests' candidates; request-local
+matching is unaffected. Set
 `suffix_hybrid_min_expected_accepted` to add an expected acceptance
 threshold after the statistics mature. Counts are halved every
 `suffix_hybrid_stats_half_life` feedback steps (default 1024).

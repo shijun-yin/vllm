@@ -496,6 +496,42 @@ def test_scan_blocks_follow_history_upper_bound():
     assert spec._num_scan_blocks(batch, 0) == 4
 
 
+@pytest.mark.parametrize("adaptive", [False, True], ids=["fixed", "adaptive-budget"])
+def test_standalone_scan_covers_sampled_token_at_block_boundary(adaptive):
+    spec, req_states = _make(2, 8, 1, 257, corpus_tokens=0, adaptive=adaptive)
+    tokens = [0] * 257
+    tokens[9] = 1
+    tokens[10] = 7
+    tokens[11] = 42
+    tokens[126] = 1
+    tokens[127] = 7
+    tokens[128] = 7
+    req_states.all_token_ids.gpu[0] = torch.tensor(tokens, device=DEVICE)
+    req_states.total_len.gpu[0] = 129
+    req_states.prompt_len.np[0] = 0
+    batch = InputBatch.make_dummy(1, 32, InputBuffers(1, 257, device=DEVICE))
+    batch.seq_lens_cpu_upper_bound.fill_(128)
+
+    assert spec._num_scan_blocks(batch, 0) == 2
+    drafts = spec.propose(
+        batch,
+        None,
+        None,
+        None,
+        None,
+        torch.ones(1, dtype=torch.int32, device=DEVICE),
+        torch.zeros(1, dtype=torch.int32, device=DEVICE),
+        torch.tensor([[7]], dtype=torch.int64, device=DEVICE),
+        None,
+        None,
+        None,
+    )
+
+    assert drafts[0, 0].item() == 7
+    assert spec.num_valid[0].item() == 1
+    assert spec.match_lens[0].item() == 1
+
+
 def test_scan_blocks_ignore_stale_scratch():
     spec, req_states = _make(4, 8, 1, 1024, corpus_tokens=1024)
     _set(req_states, 0, [], [1, 2, 3, 4, 20, 21, 22, 23])
@@ -511,12 +547,39 @@ def test_scan_blocks_ignore_stale_scratch():
 
 
 def test_corpus_ingestion_uses_scheduler_trimmed_length():
-    spec, req_states = _make(3, 8, 1, 64, corpus_tokens=1024)
+    spec, req_states = _make(3, 8, 2, 64, corpus_tokens=1024)
     _set(req_states, 0, [1, 2], [7, 8, 9, 10])
-    req_states.req_id_to_index = {"done": 0}
+    _set(req_states, 1, [3], [30, 31])
+    req_states.req_id_to_index = {"done": 0, "fallback": 1}
 
-    spec.on_requests_finished_with_lengths(["done"], {"done": 4})
+    spec.on_requests_finished_with_lengths(["fallback", "done"], {"done": 4})
 
-    assert spec.corpus[:5].cpu().tolist() == [1, 2, 7, 8, -1]
+    assert spec.corpus[:9].cpu().tolist() == [
+        1,
+        2,
+        7,
+        8,
+        -1,
+        3,
+        30,
+        31,
+        -1,
+    ]
     assert 9 not in spec.corpus
     assert 10 not in spec.corpus
+
+
+def test_corpus_excludes_front_end_stopped_requests():
+    spec, req_states = _make(3, 8, 2, 64, corpus_tokens=1024)
+    _set(req_states, 0, [1, 2], [7, 8, 9])
+    _set(req_states, 1, [3], [30, 31])
+    req_states.req_id_to_index = {"stop": 0, "normal": 1}
+
+    spec.on_requests_finished_with_lengths(
+        ["stop", "normal"], {"stop": 4}, excluded_req_ids={"stop"}
+    )
+
+    assert spec.num_docs == 1
+    assert spec.corpus[:4].cpu().tolist() == [3, 30, 31, -1]
+    assert 7 not in spec.corpus
+    assert 8 not in spec.corpus

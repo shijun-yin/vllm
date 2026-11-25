@@ -127,7 +127,8 @@ def _hybrid_route_publish_kernel(
     select = select & different_tail
 
     valid = (
-        (tl.load(num_valid_ptr + b) >= required)
+        (required > 0)
+        & (tl.load(num_valid_ptr + b) >= required)
         & (match_len >= MIN_MATCH)
         & prefix_valid
     )
@@ -245,9 +246,10 @@ class SuffixSplice:
         self,
         finished_req_ids: "Iterable[str]",
         final_token_lengths: dict[str, int],
+        excluded_req_ids: "Iterable[str] | None" = None,
     ) -> None:
         self.suffix.on_requests_finished_with_lengths(
-            finished_req_ids, final_token_lengths
+            finished_req_ids, final_token_lengths, excluded_req_ids=excluded_req_ids
         )
 
     def reset_state(self) -> None:
@@ -362,7 +364,6 @@ class SuffixSplice:
             self.last_valid[input_batch.idx_mapping] = 0
             return model_drafts
         if k <= self.prefix_len:
-            self.suffix.num_valid[: input_batch.num_reqs].zero_()
             return self._publish(
                 input_batch, model_drafts, model_drafts, num_sampled, k
             )

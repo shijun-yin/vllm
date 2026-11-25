@@ -2186,6 +2186,7 @@ def test_stop_via_update_from_output():
     assert next_output.finished_req_token_lengths == {
         requests[0].request_id: requests[0].num_tokens
     }
+    assert next_output.suffix_corpus_excluded_req_ids == set()
 
     # Test case 3: Stop on max tokens
     scheduler = create_scheduler(num_speculative_tokens=2)
@@ -2260,6 +2261,60 @@ def test_stop_via_update_from_output():
     assert len(scheduler.running) == 1
     assert not requests[0].is_finished()
     assert list(requests[0].output_token_ids) == [EOS_TOKEN_ID, 10, 11]
+
+
+def test_suffix_corpus_excludes_string_stop_request():
+    scheduler = create_scheduler(num_speculative_tokens=1)
+    requests = create_requests(num_requests=2, max_tokens=10)
+    requests[0].sampling_params.stop = ["END"]
+    for req in requests:
+        req.num_computed_tokens = req.num_tokens
+        scheduler.requests[req.request_id] = req
+        scheduler.running.append(req)
+        req.status = RequestStatus.RUNNING
+
+    scheduler_output = SchedulerOutput(
+        scheduled_new_reqs=[],
+        scheduled_cached_reqs=CachedRequestData.make_empty(),
+        num_scheduled_tokens={req.request_id: 1 for req in requests},
+        total_num_scheduled_tokens=2,
+        scheduled_encoder_inputs={},
+        scheduled_spec_decode_tokens={req.request_id: [] for req in requests},
+        finished_req_ids=set(),
+        free_encoder_mm_hashes=[],
+    )
+    scheduler.update_from_output(
+        scheduler_output,
+        ModelRunnerOutput(
+            req_ids=[req.request_id for req in requests],
+            sampled_token_ids=[[EOS_TOKEN_ID], [10]],
+            logprobs=None,
+            prompt_logprobs_dict={},
+            pooler_output=[],
+        ),
+    )
+
+    output = scheduler.schedule()
+    assert output.suffix_corpus_excluded_req_ids == {requests[0].request_id}
+    assert output.finished_req_token_lengths == {
+        requests[0].request_id: requests[0].num_tokens
+    }
+    assert scheduler.schedule().suffix_corpus_excluded_req_ids == set()
+
+
+def test_suffix_corpus_excludes_external_abort():
+    scheduler = create_scheduler(num_speculative_tokens=1)
+    (request,) = create_requests(num_requests=1, max_tokens=10)
+    request.num_computed_tokens = request.num_tokens
+    scheduler.requests[request.request_id] = request
+    scheduler.running.append(request)
+    request.status = RequestStatus.RUNNING
+
+    scheduler.finish_requests(request.request_id, RequestStatus.FINISHED_ABORTED)
+    output = scheduler.schedule()
+
+    assert output.suffix_corpus_excluded_req_ids == {request.request_id}
+    assert output.finished_req_token_lengths == {}
 
 
 def test_check_stop_min_tokens():

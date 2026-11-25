@@ -232,6 +232,103 @@ def test_splice_structured_output_skips_only_masked_rows():
     assert last_valid.tolist() == [0, 0]
 
 
+@pytest.mark.parametrize(("k", "prefix"), [(1, 1), (1, 2)])
+def test_splice_small_k_clears_stale_candidate(k, prefix):
+    idx_mapping = torch.tensor([2], dtype=torch.int64, device=DEVICE)
+    last_use_suffix = torch.full((3,), True, dtype=torch.bool, device=DEVICE)
+    last_buckets = torch.full((3,), 3, dtype=torch.int32, device=DEVICE)
+    last_valid = torch.full((3,), k, dtype=torch.int32, device=DEVICE)
+    model = torch.tensor([[100]], dtype=torch.int64, device=DEVICE)
+    suffix = torch.tensor([[1000]], dtype=torch.int64, device=DEVICE)
+    model_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
+    suffix_stats = torch.zeros((18, 3, 2), dtype=torch.int64, device=DEVICE)
+    output = torch.zeros((1, k), dtype=torch.int64, device=DEVICE)
+    _hybrid_route_publish_kernel[(1,)](
+        torch.zeros(1, dtype=torch.int32, device=DEVICE),
+        torch.tensor([4], dtype=torch.int32, device=DEVICE),
+        torch.zeros(1, dtype=torch.int32, device=DEVICE),
+        model,
+        model.stride(0),
+        suffix,
+        suffix.stride(0),
+        model_stats,
+        suffix_stats,
+        torch.zeros(1, dtype=torch.bool, device=DEVICE),
+        idx_mapping,
+        torch.ones(1, dtype=torch.int32, device=DEVICE),
+        0,
+        output,
+        output.stride(0),
+        last_use_suffix,
+        last_buckets,
+        last_valid,
+        MIN_MATCH=4,
+        K=k,
+        STATS_K=3,
+        K_PO2=1,
+        PREFIX=prefix,
+        QUALITY_GATE=False,
+        MIN_EXPECTED=0.0,
+        EXPLORATION_INTERVAL=0,
+    )
+
+    assert output.item() == 100
+    assert not last_use_suffix[2].item()
+    assert last_buckets[2].item() == -1
+    _hybrid_observe_kernel[(1,)](
+        idx_mapping,
+        torch.zeros(1, dtype=torch.bool, device=DEVICE),
+        torch.tensor([2], dtype=torch.int32, device=DEVICE),
+        torch.tensor([1], dtype=torch.int32, device=DEVICE),
+        model_stats,
+        suffix_stats,
+        last_use_suffix,
+        last_buckets,
+        last_valid,
+        K=3,
+        K_PO2=4,
+        PREFIX=prefix,
+    )
+    assert model_stats.sum().item() == 0
+    assert suffix_stats.sum().item() == 0
+    assert last_valid[2].item() == 0
+
+    model = torch.tensor([[100, 101]], dtype=torch.int64, device=DEVICE)
+    suffix = torch.tensor([[1000]], dtype=torch.int64, device=DEVICE)
+    output = torch.zeros((1, 2), dtype=torch.int64, device=DEVICE)
+    _hybrid_route_publish_kernel[(1,)](
+        torch.ones(1, dtype=torch.int32, device=DEVICE),
+        torch.tensor([4], dtype=torch.int32, device=DEVICE),
+        torch.zeros(1, dtype=torch.int32, device=DEVICE),
+        model,
+        model.stride(0),
+        suffix,
+        suffix.stride(0),
+        model_stats,
+        suffix_stats,
+        torch.zeros(1, dtype=torch.bool, device=DEVICE),
+        idx_mapping,
+        torch.ones(1, dtype=torch.int32, device=DEVICE),
+        0,
+        output,
+        output.stride(0),
+        last_use_suffix,
+        last_buckets,
+        last_valid,
+        MIN_MATCH=4,
+        K=2,
+        STATS_K=3,
+        K_PO2=2,
+        PREFIX=1,
+        QUALITY_GATE=False,
+        MIN_EXPECTED=0.0,
+        EXPLORATION_INTERVAL=0,
+    )
+    assert output[0].cpu().tolist() == [100, 1000]
+    assert last_use_suffix[2].item()
+    assert last_buckets[2].item() == 3
+
+
 def run_suffix_query(
     history,
     num_tokens,

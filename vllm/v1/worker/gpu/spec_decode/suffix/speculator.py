@@ -15,9 +15,11 @@ Extends the n-gram speculator with the two parts of SuffixDecoding
   matching.
 
 The propose path never synchronizes with the host. Ingestion reads token
-history and lengths directly from `RequestState` and processes finished
-requests in sorted id order; index updates are order-independent, so every
-TP rank holds an identical corpus without any collective.
+history from `RequestState`, using scheduler-provided final lengths when
+available and the device history length otherwise. The scheduler excludes
+string-stop and externally aborted requests from corpus ingestion. Remaining
+requests are processed in sorted id order; index updates are order-independent,
+so every TP rank holds an identical corpus without any collective.
 """
 
 from __future__ import annotations
@@ -438,7 +440,7 @@ def _corpus_draft(
     )
 
 
-@triton.jit
+@triton.jit(do_not_specialize=["num_blocks"])
 def _suffix_finalize_kernel(
     token_ids_ptr,  # *int32  [max_num_reqs, token_ids_stride]
     token_ids_stride,
@@ -625,7 +627,7 @@ def _suffix_observe_kernel(
 def _suffix_ingest_kernel(
     token_ids_ptr,  # *int32  [max_num_reqs, token_ids_stride]
     token_ids_stride,
-    docs_ptr,  # *int32  [F, 2]  (slot, start) of finished requests, sorted
+    docs_ptr,  # *int32  [F, 3]  (slot, start, final length), sorted
     num_docs,
     total_len_ptr,  # *int32  [max_num_reqs]
     corpus_ptr,  # *int32  [corpus_len]
@@ -656,20 +658,22 @@ def _suffix_ingest_kernel(
     f = tl.program_id(0).to(tl.int64)
     blk = tl.program_id(1).to(tl.int64)
     cap = tl.cast(corpus_len, tl.int64)
-    req = tl.load(docs_ptr + 2 * f).to(tl.int64)
-    end = tl.load(total_len_ptr + req).to(tl.int64)
+    req = tl.load(docs_ptr + 3 * f).to(tl.int64)
+    end = tl.load(docs_ptr + 3 * f + 2).to(tl.int64)
+    end = tl.where(end >= 0, end, tl.load(total_len_ptr + req).to(tl.int64))
     # Keep the newest cap - 1 tokens of an over-long response.
-    start = tl.maximum(tl.load(docs_ptr + 2 * f + 1).to(tl.int64), end - (cap - 1))
+    start = tl.maximum(tl.load(docs_ptr + 3 * f + 1).to(tl.int64), end - (cap - 1))
     n = tl.maximum(end - start, 0)
     # Block 0 also writes the separator.
     if (blk > 0) & (blk * BLOCK >= n):
         return
     head = tl.load(head_ptr)
     for i in range(f):
-        req_i = tl.load(docs_ptr + 2 * i).to(tl.int64)
-        end_i = tl.load(total_len_ptr + req_i).to(tl.int64)
+        req_i = tl.load(docs_ptr + 3 * i).to(tl.int64)
+        end_i = tl.load(docs_ptr + 3 * i + 2).to(tl.int64)
+        end_i = tl.where(end_i >= 0, end_i, tl.load(total_len_ptr + req_i).to(tl.int64))
         start_i = tl.maximum(
-            tl.load(docs_ptr + 2 * i + 1).to(tl.int64), end_i - (cap - 1)
+            tl.load(docs_ptr + 3 * i + 1).to(tl.int64), end_i - (cap - 1)
         )
         n_i = tl.maximum(end_i - start_i, 0)
         head = tl.where(head + n_i + 1 > cap, 0, head) + n_i + 1
@@ -684,10 +688,11 @@ def _suffix_ingest_kernel(
     keep_sep = sep >= 0
     later = head + n + 1
     for g in range(f + 1, num_docs):
-        req_g = tl.load(docs_ptr + 2 * g).to(tl.int64)
-        end_g = tl.load(total_len_ptr + req_g).to(tl.int64)
+        req_g = tl.load(docs_ptr + 3 * g).to(tl.int64)
+        end_g = tl.load(docs_ptr + 3 * g + 2).to(tl.int64)
+        end_g = tl.where(end_g >= 0, end_g, tl.load(total_len_ptr + req_g).to(tl.int64))
         start_g = tl.maximum(
-            tl.load(docs_ptr + 2 * g + 1).to(tl.int64), end_g - (cap - 1)
+            tl.load(docs_ptr + 3 * g + 1).to(tl.int64), end_g - (cap - 1)
         )
         n_g = tl.maximum(end_g - start_g, 0)
         later = tl.where(later + n_g + 1 > cap, 0, later)
@@ -863,7 +868,10 @@ class SuffixSpeculator(BaseSpeculator):
         self.on_requests_finished_with_lengths(finished_req_ids, {})
 
     def on_requests_finished_with_lengths(
-        self, finished_req_ids: Iterable[str], final_token_lengths: dict[str, int]
+        self,
+        finished_req_ids: Iterable[str],
+        final_token_lengths: dict[str, int],
+        excluded_req_ids: Iterable[str] | None = None,
     ) -> None:
         """Add finished responses to the corpus before their slots are freed."""
         if not self.has_corpus:
@@ -875,6 +883,8 @@ class SuffixSpeculator(BaseSpeculator):
         # this kernel runs.
         docs = []
         for req_id in sorted(finished_req_ids):
+            if excluded_req_ids is not None and req_id in excluded_req_ids:
+                continue
             slot = req_states.req_id_to_index.get(req_id)
             if slot is None:
                 continue
@@ -882,10 +892,10 @@ class SuffixSpeculator(BaseSpeculator):
             # assistant header) so the first response tokens are indexed by
             # the tokens that precede them.
             start = max(int(req_states.prompt_len.np[slot]) - _PROMPT_CONTEXT, 0)
-            docs += [slot, start]
+            docs += [slot, start, final_token_lengths.get(req_id, -1)]
         if not docs:
             return
-        num_docs = len(docs) // 2
+        num_docs = len(docs) // 3
         if self.num_docs + num_docs >= 1 << 31:
             # Index entries pack doc_seq into 31 bits; start a new index (the
             # corpus tokens stay, only their entries are dropped).
@@ -895,13 +905,7 @@ class SuffixSpeculator(BaseSpeculator):
         self.num_docs += num_docs
         docs_gpu = async_tensor_h2d(docs, self.device, torch.int32)
         token_ids = self.req_states.all_token_ids.gpu
-        ingest_end = req_states.total_len.gpu
-        if final_token_lengths:
-            ingest_end = ingest_end.clone()
-            for req_id, final_len in final_token_lengths.items():
-                slot = req_states.req_id_to_index.get(req_id)
-                if slot is not None:
-                    ingest_end[slot] = final_len
+        total_len = req_states.total_len.gpu
         _suffix_ingest_kernel[
             (num_docs, triton.cdiv(self.max_model_len, _INGEST_BLOCK))
         ](
@@ -909,7 +913,7 @@ class SuffixSpeculator(BaseSpeculator):
             token_ids.stride(0),
             docs_gpu,
             num_docs,
-            ingest_end,
+            total_len,
             self.corpus,
             self.corpus_len,
             self.corpus_head,
@@ -930,7 +934,10 @@ class SuffixSpeculator(BaseSpeculator):
         max_history_len = int(
             input_batch.seq_lens_cpu_upper_bound[: input_batch.num_reqs].max().item()
         )
-        active_len = min(self.max_model_len, max_history_len + prefix_len)
+        sampled_margin = int(prefix_len == 0)
+        active_len = min(
+            self.max_model_len, max_history_len + prefix_len + sampled_margin
+        )
         return triton.cdiv(max(active_len, 1), self.block_l)
 
     def _query(
@@ -1011,7 +1018,8 @@ class SuffixSpeculator(BaseSpeculator):
             DEPTH_PO2=triton.next_power_of_2(self.max_depth),
             K=num_tokens,
             K_PO2=max(1, triton.next_power_of_2(num_tokens)),
-            NB_PO2=max(1, triton.next_power_of_2(num_scan_blocks)),
+            # Keep the JIT signature stable; num_scan_blocks masks stale slots.
+            NB_PO2=max(1, triton.next_power_of_2(self.n_blocks)),
             KEY_MODE=self.corpus_key_mode if require_full else 0,
             num_warps=4,
         )

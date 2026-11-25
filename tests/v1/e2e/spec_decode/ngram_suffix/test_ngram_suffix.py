@@ -9,6 +9,8 @@ from tests.models.utils import check_logprobs_close
 from tests.utils import single_gpu_only
 from vllm import SamplingParams
 from vllm.config import CompilationConfig
+from vllm.logprobs import Logprob
+from vllm.outputs import CompletionOutput, RequestOutput
 from vllm.platforms import current_platform
 
 from ..utils import (
@@ -262,13 +264,38 @@ def check_greedy_output_close(expected, actual, name):
         for position, (token_0, token_1) in enumerate(
             zip(expected_completion.token_ids, actual_completion.token_ids)
         ):
-            if token_0 != token_1:
-                break
+            assert token_0 == token_1, f"{name}: token mismatch at {position}"
             logprob_0 = expected_completion.logprobs[position][token_0].logprob
             logprob_1 = actual_completion.logprobs[position][token_1].logprob
             assert math.isclose(logprob_0, logprob_1, rel_tol=1e-3, abs_tol=1e-3), (
                 f"{name}: logprob mismatch at {position}: {logprob_0} != {logprob_1}"
             )
+
+
+def _make_output(tokens, logprobs):
+    completion = CompletionOutput(
+        index=0,
+        text="",
+        token_ids=tokens,
+        cumulative_logprob=sum(logprobs),
+        logprobs=[
+            {token: Logprob(logprob)}
+            for token, logprob in zip(tokens, logprobs, strict=True)
+        ],
+        finish_reason="stop",
+    )
+    return RequestOutput("test", None, [], None, [completion], True)
+
+
+def test_greedy_output_close_rejects_late_mutation():
+    expected = _make_output([1, 2, 3], [-0.1, -0.2, -0.3])
+    different_token = _make_output([1, 2, 4], [-0.1, -0.2, -0.3])
+    with pytest.raises(AssertionError, match="token mismatch at 2"):
+        check_greedy_output_close([expected], [different_token], "mutation")
+
+    different_logprob = _make_output([1, 2, 3], [-0.1, -0.2, -0.5])
+    with pytest.raises(AssertionError, match="logprob mismatch at 2"):
+        check_greedy_output_close([expected], [different_logprob], "mutation")
 
 
 class SpliceProbe:
@@ -288,6 +315,46 @@ class SpliceProbe:
             else 0
         )
         return type(drafter).__name__, observed, corpus_observed
+
+    def enable_stop_trace(self):
+        splice = self.model_runner.splice
+        self.stop_trace = []
+        original = splice.on_requests_finished_with_lengths
+
+        def on_finished(finished_req_ids, final_token_lengths, excluded_req_ids=None):
+            req_states = self.model_runner.req_states
+            for req_id in finished_req_ids:
+                req_index = req_states.req_id_to_index.get(req_id)
+                if req_index is None:
+                    continue
+                prompt_len = int(req_states.prompt_len.np[req_index])
+                total_len = int(req_states.total_len.gpu[req_index].item())
+                excluded = excluded_req_ids is not None and req_id in excluded_req_ids
+                self.stop_trace.append(
+                    {
+                        "request_id": req_id,
+                        "generated_tokens": req_states.all_token_ids.gpu[
+                            req_index, prompt_len:total_len
+                        ]
+                        .cpu()
+                        .tolist(),
+                        "excluded": excluded,
+                    }
+                )
+            return original(
+                finished_req_ids, final_token_lengths, excluded_req_ids=excluded_req_ids
+            )
+
+        splice.on_requests_finished_with_lengths = on_finished
+        return True
+
+    def read_stop_trace(self):
+        splice = self.model_runner.splice
+        return {
+            "events": self.stop_trace,
+            "num_docs": splice.suffix.num_docs,
+            "corpus_head": int(splice.suffix.corpus_head.item()),
+        }
 
 
 def check_splice_llm_correctness(
@@ -375,6 +442,54 @@ def test_suffix_splice_mtp_llm_correctness(vllm_runner):
         ),
         expected_drafter="MTPSpeculator",
     )
+
+
+@single_gpu_only
+def test_suffix_splice_string_stop_not_ingested(vllm_runner):
+    model = "Qwen/Qwen3-4B-FP8" if current_platform.is_cuda() else "Qwen/Qwen3-4B"
+    speculative_config = {
+        "method": "dflash",
+        "model": "z-lab/Qwen3-4B-DFlash-b16",
+        "num_speculative_tokens": 7,
+        "suffix_hybrid_mode": "splice",
+        "suffix_hybrid_min_match_length": 2,
+        "suffix_decoding_max_tree_depth": 8,
+        "suffix_decoding_corpus_tokens": 65536,
+    }
+    with vllm_runner(
+        model,
+        speculative_config=speculative_config,
+        worker_extension_cls=f"{__name__}.SpliceProbe",
+        max_model_len=512,
+        max_num_seqs=1,
+        max_num_batched_tokens=512,
+        enable_prefix_caching=False,
+        gpu_memory_utilization=0.9,
+    ) as runner:
+        runner.llm.collective_rpc("enable_stop_trace")
+        prompt = "Repeat this exact sentence: alpha END omega"
+        output = runner.llm.generate(
+            [prompt],
+            SamplingParams(temperature=0, max_tokens=16, stop=["END"]),
+        )[0].outputs[0]
+        assert output.stop_reason == "END"
+        runner.llm.generate(
+            ["Write a haiku about rain."],
+            SamplingParams(temperature=0, max_tokens=8),
+        )
+        runner.llm.generate(
+            ["Write a short poem about the sea."],
+            SamplingParams(temperature=0, max_tokens=8),
+        )
+
+        trace = runner.llm.collective_rpc("read_stop_trace")[0]
+        excluded = [event for event in trace["events"] if event["excluded"]]
+        assert excluded
+        assert any(
+            len(event["generated_tokens"]) > len(output.token_ids) for event in excluded
+        ), "Expected hidden tokens past the front-end stop boundary"
+        assert trace["num_docs"] > 0
+        assert trace["corpus_head"] > 0
 
 
 @pytest.mark.parametrize("max_num_seqs", [1, 2])

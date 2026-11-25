@@ -256,6 +256,7 @@ class Scheduler(SchedulerInterface):
         # This is flushed at the end of each scheduling step.
         self.finished_req_ids: set[str] = set()
         self.finished_req_token_lengths: dict[str, int] = {}
+        self.finished_req_corpus_excluded_ids: set[str] = set()
 
         # IDs of requests preempted since the last call to schedule().
         self.reset_preempted_req_ids: set[str] = set()
@@ -1776,6 +1777,9 @@ class Scheduler(SchedulerInterface):
             # the previous and the current steps.
             finished_req_ids=self.finished_req_ids,
             finished_req_token_lengths=finished_req_token_lengths,
+            suffix_corpus_excluded_req_ids=(
+                self.finished_req_corpus_excluded_ids & self.finished_req_ids
+            ),
             free_encoder_mm_hashes=self.encoder_cache_manager.get_freed_mm_hashes(),
             encoder_input_updates=self._get_encoder_input_updates(
                 num_scheduled_tokens, new_reqs_data, scheduled_encoder_inputs
@@ -1922,6 +1926,7 @@ class Scheduler(SchedulerInterface):
         # NOTE: We shouldn't just clear() here because it will also affect
         # the scheduler output.
         self.finished_req_ids = set()
+        self.finished_req_corpus_excluded_ids = set()
         self.reset_preempted_req_ids = set()
 
     def _update_request_as_session(
@@ -2594,6 +2599,8 @@ class Scheduler(SchedulerInterface):
                 final_token_length = request.num_tokens
                 finished = self._handle_stopped_request(request)
                 if finished:
+                    if request.sampling_params.stop:
+                        self.finished_req_corpus_excluded_ids.add(req_id)
                     self.finished_req_token_lengths[req_id] = final_token_length
                     kv_transfer_params, ec_transfer_params = self._free_request(request)
                     if (
@@ -3221,6 +3228,7 @@ class Scheduler(SchedulerInterface):
                 self.finished_recving_kv_req_ids.discard(request.request_id)
                 self.failed_recving_kv_req_ids.discard(request.request_id)
 
+            self.finished_req_corpus_excluded_ids.add(request.request_id)
             request.status = finished_status
             self._free_request(request, delay_free_blocks=delay_free_blocks)
             if delay_free_blocks:

@@ -287,6 +287,8 @@ class SchedulerOutput:
 
     # Final scheduler-trimmed lengths for suffix-corpus ingestion.
     finished_req_token_lengths: dict[str, int] = field(default_factory=dict)
+    # Requests whose output boundaries are unsafe for suffix-corpus ingestion.
+    suffix_corpus_excluded_req_ids: set[str] = field(default_factory=set)
 
     # Whether any of the scheduled requests use structured output.
     # Set only in async scheduling case.

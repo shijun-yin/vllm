@@ -40,7 +40,7 @@ The longer match wins. The draft always has `num_speculative_tokens` tokens; slo
 Seeded sampling isn't reproducible with suffix decoding: drafts come from previously finished requests, and with adaptive verification the number of verified slots depends on the batch. For reproducible seeded sampling, set `suffix_decoding_corpus_tokens: 0` and leave adaptive verification off.
 
 !!! warning "The corpus is shared"
-    The corpus holds responses from all requests, whatever their `cache_salt` or LoRA adapter, and any request can draft from it. Drafts never change the output distribution, but how many are accepted shows in decode speed. Where requests must not influence each other, set `suffix_decoding_corpus_tokens: 0`.
+    The corpus holds responses from all requests, whatever their `cache_salt` or LoRA adapter, and any request can draft from it. Drafts never change the output distribution, but how many are accepted shows in decode speed. Where requests must not influence each other, set `suffix_decoding_corpus_tokens: 0`. Requests using string `stop` and aborted requests are excluded from the corpus so front-end-trimmed tokens cannot leak into other requests; request-local suffix matching still works.
 
 ## Adaptive verification
 

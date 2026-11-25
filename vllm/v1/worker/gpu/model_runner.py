@@ -1290,13 +1290,17 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         if self.speculator is not None and finished_req_ids:
             if hasattr(self.speculator, "on_requests_finished_with_lengths"):
                 self.speculator.on_requests_finished_with_lengths(
-                    finished_req_ids, scheduler_output.finished_req_token_lengths
+                    finished_req_ids,
+                    scheduler_output.finished_req_token_lengths,
+                    excluded_req_ids=scheduler_output.suffix_corpus_excluded_req_ids,
                 )
             else:
                 self.speculator.on_requests_finished(finished_req_ids)
         if self.splice is not None and finished_req_ids:
             self.splice.on_requests_finished_with_lengths(
-                finished_req_ids, scheduler_output.finished_req_token_lengths
+                finished_req_ids,
+                scheduler_output.finished_req_token_lengths,
+                excluded_req_ids=scheduler_output.suffix_corpus_excluded_req_ids,
             )
         preempted_req_ids = scheduler_output.preempted_req_ids
         if preempted_req_ids:
