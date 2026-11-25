@@ -375,6 +375,15 @@ def run_wave(llm, prompts, wave, args):
         "accepted_per_draft": accepted / drafts if drafts else None,
         "draft_token_acceptance": accepted / draft_tokens if draft_tokens else None,
     }
+    if args.native_spec_metrics:
+        result["request_spec_metrics"] = [
+            (
+                output.outputs[0].spec_decode_metrics.to_dict()
+                if output.outputs[0].spec_decode_metrics is not None
+                else None
+            )
+            for output in outputs
+        ]
     if args.profile_stages or args.profile_host:
         result["stage_profile"] = llm.collective_rpc("read_stage_profile")[0]
     print(
@@ -428,6 +437,9 @@ def main():
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--profile-stages", action="store_true")
     parser.add_argument("--profile-host", action="store_true")
+    parser.add_argument("--native-spec-metrics", action="store_true")
+    parser.add_argument("--native-iteration-details", action="store_true")
+    parser.add_argument("--jit-verbose", action="store_true")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
@@ -505,6 +517,11 @@ def main():
         gpu_memory_utilization=args.gpu_memory_utilization,
         enable_prefix_caching=False,
         disable_log_stats=False,
+        per_request_spec_decode_metrics=(
+            "detailed" if args.native_spec_metrics else "none"
+        ),
+        enable_logging_iteration_details=args.native_iteration_details,
+        jit_monitor_verbose=args.jit_verbose,
         speculative_config=spec,
         worker_extension_cls=f"{__name__}.SpecStateExtension",
         seed=1234,
@@ -556,6 +573,9 @@ def main():
         "num_speculative_tokens": k if args.mode != "no_spec" else 0,
         "profile_stages": args.profile_stages,
         "profile_host": args.profile_host or None,
+        "native_spec_metrics": args.native_spec_metrics or None,
+        "native_iteration_details": args.native_iteration_details or None,
+        "jit_verbose": args.jit_verbose or None,
         "warmup_wave": args.warmup_wave or None,
         "wsl_pin_memory": os.environ.get("VLLM_WSL2_ENABLE_PIN_MEMORY"),
         "results": results,

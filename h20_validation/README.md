@@ -59,8 +59,8 @@ drafter block size 为 8，所以 K=7。产品 patch 基于 vLLM `bf151b7eb1`。
 ## 文件
 
 - `suffix_splice.patch`：产品代码、测试与产品文档（41b17fa4ef）。
-- `ingest_host_fix.patch`：本轮相对 41b17fa4ef 的入库 host 修复与混合长度回归；
-  最新本地诊断需在主 patch 后再应用此增量。
+- `ingest_host_fix.patch`：本轮相对 41b17fa4ef 的入库 host 与 finalize JIT 稳定性
+  修复及回归；最新本地诊断需在主 patch 后再应用此增量。
 - `benchmark_splice.py`：no-spec / pure / splice 同口径离线基准；可选 CUDA 分段打点，
   并记录逐请求 token 哈希和每波起止时间。
 - `prepare_data.py`、`datasets.json`：固定数据 revision 和 SHA256。
@@ -85,8 +85,12 @@ Python 前对 pure/splice 同时设置 `VLLM_WSL2_ENABLE_PIN_MEMORY=1`；JSON �
 原生起草、本地扫描、corpus/finalize、路由、反馈和入库。事件区间存在嵌套，不能求和当
 整波时间；事件创建和 Python 包装本身有开销，所以分段结果只用于归因，最终吞吐需关闭
 该开关重跑。`--profile-host` 只记录 host 区间、调用间隙和批次形状，不创建 CUDA
-events；任何包装仍可能改变自然 EOS 轨迹，只能与其自身的输出哈希一起解释。至少做两轮
-pure/splice，并交换进程运行顺序；逐请求 token 哈希用于确认重复运行是否同轨迹。
+events；任何包装仍可能改变自然 EOS 轨迹，只能与其自身的输出哈希一起解释。
+`--native-spec-metrics` 开启 vLLM 原生逐请求 accepted/drafted/verified 数组，
+`--native-iteration-details` 开启原生逐步 batch/GPU elapsed 日志。`--jit-verbose` 记录
+每个 Triton JIT 变体；默认 `warning_once` 会隐藏同函数的新形状/constexpr 编译，不能
+用来证明 hot 中没有 JIT。至少做两轮 pure/splice，并交换进程运行顺序；逐请求 token
+哈希用于确认重复运行是否同轨迹。
 
 ## 0. 准备，约 30 分钟
 

@@ -1,0 +1,446 @@
+(MainProcess pid=296) INFO 11-25 08:48:47 [startup.py:96] non-default args: {'seed': 1234, 'max_model_len': 3072, 'enable_prefix_caching': False, 'gpu_memory_utilization': 0.98, 'max_num_batched_tokens': 1024, 'max_num_seqs': 4, 'language_model_only': True, 'speculative_config': {'method': 'dflash', 'num_speculative_tokens': 15,FlashInfer kernels are disabled: flashinfer-cubin is not installed and nvcc (CUDA_HOME, CUDA_PATH, PATH or /usr/local/cuda) or ninja (PATH) is missing. Set CUDA_HOME to a CUDA toolkit and put ninja on PATH, or run `vllm download-kernels`.
+Loading safetensors checkpoint shards:   0% Completed | 0/2 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards:  50% Completed | 1/2 [00:02<00:02,  2.41s/it]
+Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:02<00:00,  1.27s/it]
+Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:02<00:00,  1.44s/it]
+
+Loading safetensors checkpoint shards:   0% Completed | 0/1 [00:00<?, ?it/s]
+Loading safetensors checkpoint shards: 100% Completed | 1/1 [00:00<00:00, 36.30it/s]
+
+[rank0]:W1125 08:49:45.105000 424 torch/_inductor/utils.py:1806] Not enough SMs to use max_autotune_gemm mode
+JIT kernel warmup (40 compile keys):   0%|          | 0/4 [00:00<?, ?kernel/s]JIT kernel warmup (40 compile keys): 100%|██████████| 4/4 [00:08<00:00,  2.20s/kernel, _DecoratedTritonJitKernel (8 keys)]
+Capturing CUDA graphs (PIECEWISE):   0%|          | 0/19 [00:00<?, ?it/s]Capturing CUDA graphs (PIECEWISE):  11%|█         | 2/19 [00:00<00:00, 17.98it/s]Capturing CUDA graphs (PIECEWISE):  21%|██        | 4/19 [00:00<00:00, 17.86it/s]Capturing CUDA graphs (PIECEWISE):  32%|███▏      | 6/19 [00:00<00:00, 17.39it/s]Capturing CUDA graphs (PIECEWISE):  42%|████▏     | 8/19 [00:00<00:00, 17.85it/s]Capturing CUDA graphs (PIECEWISE):  53%|█████▎    | 10/19 [00:00<00:00, 18.15it/s]Capturing CUDA graphs (PIECEWISE):  63%|██████▎   | 12/19 [00:00<00:00, 17.60it/s]Capturing CUDA graphs (PIECEWISE):  79%|███████▉  | 15/19 [00:00<00:00, 18.81it/s]Capturing CUDA graphs (PIECEWISE):  89%|████████▉ | 17/19 [00:00<00:00, 18.59it/s]Capturing CUDA graphs (PIECEWISE): 100%|██████████| 19/19 [00:01<00:00, 18.44it/s]Capturing CUDA graphs (PIECEWISE): 100%|██████████| 19/19 [00:01<00:00, 18.22it/s]
+Capturing CUDA graphs (FULL):   0%|          | 0/4 [00:00<?, ?it/s]Capturing CUDA graphs (FULL):  75%|███████▌  | 3/4 [00:00<00:00, 28.63it/s]Capturing CUDA graphs (FULL): 100%|██████████| 4/4 [00:00<00:00, 29.16it/s]
+Capturing dflash CUDA graphs (FULL):   0%|          | 0/4 [00:00<?, ?it/s]Capturing dflash CUDA graphs (FULL): 100%|██████████| 4/4 [00:00<00:00, 105.89it/s]
+9b-deploy/models/Qwen3-4B-FP8', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.bfloat16, max_seq_len=3072, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=False, quantization=fp8, quantization_config=None, enforce_eager=False, aux_output_config=AuxOutputConfig(enable_return_routed_experts=False, max_bytes=None), kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, per_request_spec_decode_metrics='none', kv_cache_metrics=False, kv_cache_metrics_sample=0.01, custom_histogram_buckets=None, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False, jit_monitor_mode='warn', jit_monitor_verbose=False), seed=1234, served_model_name=/root/qwen35-9b-deploy/models/Qwen3-4B-FP8, enable_prefix_caching=False, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['+quant_fp8', 'none'], 'ir_enable_torch_wrap': True, 'splitting_ops': ['vllm::unified_attention_with_output', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::zaya_cca', 'vllm::qwen4_exp_ple_short_conv', 'vllm::qwen4_exp_qsa_with_output', 'vllm::qwen4_exp_qsa_prepare_with_output', 'vllm::linear_attention', 'vllm::qwen_gdn_attention_core', 'vllm::qwen_gdn_attention_core_fused_norm_packed', 'vllm::qwen_gdn_attention_core_fused_norm_rocm', 'vllm::gdn_attention_core_xpu', 'vllm::olmo_hybrid_gdn_full_forward', 'vllm::sparse_attn_indexer', 'vllm::rocm_aiter_sparse_attn_indexer', 'vllm::deepseek_v4_attention', 'vllm::hpc_rope_norm_forward', 'vllm::step5_csa_attention', 'vllm::unified_kv_cache_update', 'vllm::unified_mla_kv_cache_update'], 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_token_budget': 5120, 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': None, 'cudagraph_decoder_replay': True, 'decoder_replay_cudagraph_capture_sizes': [], 'decoder_replay_trim_threshold': 768, 'compile_sizes': [], 'compile_ranges_endpoints': [1024], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'use_breakable_cudagraph': False, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128], 'prefill_cudagraph_capture_token_sizes': [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128], 'max_prefill_cudagraph_capture_tokens': 128, 'decode_cudagraph_capture_request_sizes': [1, 2, 3, 4], 'max_decode_cudagraph_capture_requests': 4, 'max_decode_cudagraph_capture_tokens': None, 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': True, 'fuse_act_quant': True, 'fuse_attn_quant': False, 'fuse_allreduce_rms': False, 'enable_qk_norm_rope_fusion': False, 'fuse_rope_kvcache_cat_mla': False, 'fuse_act_padding': False, 'fuse_qk_norm_rope_kvcache': False}, 'max_cudagraph_capture_size': 128, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'], gelu_and_mul_sparse=['triton', 'native'], rotary_embedding=['native'], rotary_embedding_query_only=['native']), enable_flashinfer_autotune=True, enable_flashinfer_mm_encoder_autotune=False, enable_rocm_segmented_attn_autotune=False, enable_rocm_aiter_gemm_warmup=False, enable_cutedsl_warmup=True, enable_jit_warmup=True, monokernel=False, moe_backend='auto', step5_attention_backend='native', sparse_indexer_topk_backend='auto', flashinfer_sparse_mla_kernel='auto', linear_backend='auto', linear_backend_per_quant=None, rdna_hybrid_w4a16_prefill_dequant='disable', b12x_moe_uncompressed_scales=False)
+(EngineCore pid=424) INFO 11-25 08:49:07 [worker_base.py:361] Injected <class '__mp_main__.SpecStateExtension'> into <class 'vllm.v1.worker.gpu_worker.Worker'> for extended collective_rpc calls ['enable_stage_profile', 'read_hybrid_stats', 'read_stage_profile', 'reset_spec_state', 'reset_stage_profile']
+(EngineCore pid=424) INFO 11-25 08:49:08 [parallel_state.py:1981] world_size=1 rank=0 local_rank=0 distributed_init_method=file:///tmp/vllm_dist_b9bbdfa394714f0583a192462388d64f backend=nccl
+(EngineCore pid=424) INFO 11-25 08:49:08 [parallel_state.py:2461] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, ETP rank 0, EP rank N/A, EPLB rank N/A
+(EngineCore pid=424) INFO 11-25 08:49:08 [cuda.py:238] NVIDIA Confidential Computing not detected: NVML failed: NVMLError_NotSupported(3)
+(EngineCore pid=424) WARNING 11-25 08:49:08 [buffer_utils.py:69] Pinned host memory is not available on this platform; UVA buffers fall back to pageable host memory with explicit host-to-device copies.
+(EngineCore pid=424) INFO 11-25 08:49:09 [model_runner.py:420] Loading model from scratch...
+(EngineCore pid=424) WARNING 11-25 08:49:09 [quant_utils.py:388] MarlinFP8ScaledMMLinearKernel runs QuantKey(f8e4m3fn,scale(f32,dynamic,GroupShape(row=1, col=128)),symmetric) activations as unquantized. Set VLLM_STRICT_QUANT_SCHEME=1 to forbid this fallback.
+(EngineCore pid=424) INFO 11-25 08:49:12 [flash_attn.py:1201] Using FlashAttention version 2
+(EngineCore pid=424) INFO 11-25 08:49:13 [base_loader.py:100] Initializing model took 4.264501 seconds
+(EngineCore pid=424) INFO 11-25 08:49:13 [weight_utils.py:1082] Filesystem type for checkpoints: EXT4. Checkpoint size: 4.83 GiB. Available RAM: 12.46 GiB.
+(EngineCore pid=424) INFO 11-25 08:49:13 [weight_utils.py:1105] Auto-prefetch is disabled because the filesystem (EXT4) is not a recognized network FS (NFS/Lustre). If you want to force prefetching, start vLLM with --safetensors-load-strategy=prefetch.
+(EngineCore pid=424) INFO 11-25 08:49:16 [default_loader.py:570] Loading weights took 2.90 seconds
+(EngineCore pid=424) WARNING 11-25 08:49:17 [marlin_utils_fp8.py:98] Your GPU does not have native support for FP8 computation but FP8 quantization is being used. Weight-only FP8 compression will be used leveraging the Marlin kernel. This may degrade performance for compute-heavy workloads.
+(EngineCore pid=424) INFO 11-25 08:49:17 [utils.py:417] Backends selected for Qwen3ForCausalLM (/root/qwen35-9b-deploy/models/Qwen3-4B-FP8):
+(EngineCore pid=424) INFO 11-25 08:49:17 [utils.py:417]   layer     | count | backend                       | modules
+(EngineCore pid=424) INFO 11-25 08:49:17 [utils.py:417]   attention |    36 | FLASH_ATTN                    | model.layers.[0-35].self_attn.attn
+(EngineCore pid=424) INFO 11-25 08:49:17 [utils.py:417]   linear    |     2 | unquantized [w=bfloat16]      | model.embed_tokens, lm_head
+(EngineCore pid=424) INFO 11-25 08:49:17 [utils.py:417]   linear    |   144 | MarlinFP8ScaledMMLinearKernel | model.layers.[0-35].self_attn.{qkv_proj,o_proj}, model.layers.[0-35].mlp.{gate_up_proj,down_proj}
+(EngineCore pid=424) INFO 11-25 08:49:17 [eagle3_utils.py:30] Using Eagle3 auxiliary layers from config: (2, 10, 18, 26, 34)
+(EngineCore pid=424) INFO 11-25 08:49:17 [kernel.py:578] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'], gelu_and_mul_sparse=['triton', 'native'], rotary_embedding=['native'], rotary_embedding_query_only=['native'])
+(EngineCore pid=424) WARNING 11-25 08:49:17 [vllm.py:2424] max_num_scheduled_tokens is set to 1024 based on the speculative decoding settings. This may lead to suboptimal performance. Consider increasing max_num_batched_tokens to accommodate the additional draft token slots, or decrease num_speculative_tokens.
+(EngineCore pid=424) INFO 11-25 08:49:17 [compilation.py:429] Enabled custom fusions: norm_quant, act_quant
+(EngineCore pid=424) INFO 11-25 08:49:17 [base_loader.py:100] Initializing model took 0.053535 seconds
+(EngineCore pid=424) INFO 11-25 08:49:17 [weight_utils.py:1082] Filesystem type for checkpoints: EXT4. Checkpoint size: 1.00 GiB. Available RAM: 12.42 GiB.
+(EngineCore pid=424) INFO 11-25 08:49:18 [default_loader.py:570] Loading weights took 0.68 seconds
+(EngineCore pid=424) INFO 11-25 08:49:18 [utils.py:417] Backends selected for DFlashQwen3ForCausalLM (/root/qwen35-9b-deploy/models/Qwen3-4B-DFlash-b16):
+(EngineCore pid=424) INFO 11-25 08:49:18 [utils.py:417]   layer     | count | backend                  | modules
+(EngineCore pid=424) INFO 11-25 08:49:18 [utils.py:417]   attention |     5 | FLASH_ATTN               | model.layers.[0-4].self_attn.attn
+(EngineCore pid=424) INFO 11-25 08:49:18 [utils.py:417]   linear    |    23 | unquantized [w=bfloat16] | model.layers.[0-4].self_attn.{qkv_proj,o_proj}, model.layers.[0-4].mlp.{gate_up_proj,down_proj}, model.{fc,embed_tokens}, lm_head
+(EngineCore pid=424) INFO 11-25 08:49:18 [model_runner.py:460] Model loading took 5.29 GiB memory and 9.551454 seconds
+(EngineCore pid=424) WARNING 11-25 08:49:18 [topk_topp_sampler.py:126] FlashInfer top-p/top-k sampling unavailable: FlashInfer kernels are disabled; falling back. Set VLLM_USE_FLASHINFER_SAMPLER=0 to silence.
+(EngineCore pid=424) INFO 11-25 08:49:18 [torch_utils.py:302] Reducing Torch threads from 8 to 1 for serving. Set OMP_NUM_THREADS in the external environment to override.
+(EngineCore pid=424) INFO 11-25 08:49:18 [utils.py:428] Using LBNHC KV cache layout.
+(EngineCore pid=424) INFO 11-25 08:49:19 [monitor.py:40] [backbone] Starting torch.compile
+(EngineCore pid=424) INFO 11-25 08:49:24 [backends.py:1110] [backbone] Using cache directory: /root/.cache/vllm/torch_compile_cache/b26d91dbc1/rank_0_0/backbone for vLLM's torch.compile
+(EngineCore pid=424) INFO 11-25 08:49:24 [backends.py:1167] [backbone] Dynamo bytecode transform time: 5.40 s
+(EngineCore pid=424) INFO 11-25 08:49:34 [backends.py:421] [backbone] Compiling a graph for compile range (1, 1024) takes 8.54 s
+(EngineCore pid=424) INFO 11-25 08:49:42 [backends.py:952] collected artifacts: 37 entries, 4 artifacts, 8079854 bytes total
+(EngineCore pid=424) INFO 11-25 08:49:42 [decorators.py:761] [backbone] saved AOT compiled function to /root/.cache/vllm/torch_compile_cache/torch_aot_compile/72cbedc8ba9f8772a22ce5adfef907e47eee27fca503a4e8f3a24e17a5b5d127/rank_0_0/model
+(EngineCore pid=424) INFO 11-25 08:49:42 [monitor.py:62] [backbone] torch.compile took 23.02 s in total
+(EngineCore pid=424) INFO 11-25 08:49:42 [monitor.py:91] [backbone] Initial profiling/warmup run took 0.03 s
+(EngineCore pid=424) INFO 11-25 08:49:42 [monitor.py:40] [dflash_head] Starting torch.compile
+(EngineCore pid=424) INFO 11-25 08:49:43 [backends.py:1110] [dflash_head] Using cache directory: /root/.cache/vllm/torch_compile_cache/b26d91dbc1/rank_0_0/dflash_head for vLLM's torch.compile
+(EngineCore pid=424) INFO 11-25 08:49:43 [backends.py:1167] [dflash_head] Dynamo bytecode transform time: 0.60 s
+(EngineCore pid=424) INFO 11-25 08:49:47 [backends.py:421] [dflash_head] Compiling a graph for compile range (1, 1024) takes 2.87 s
+(EngineCore pid=424) INFO 11-25 08:49:48 [backends.py:952] collected artifacts: 6 entries, 3 artifacts, 5288323 bytes total
+(EngineCore pid=424) INFO 11-25 08:49:48 [decorators.py:761] [dflash_head] saved AOT compiled function to /root/.cache/vllm/torch_compile_cache/torch_aot_compile/b1c58c7b24441a33c97ddcb4a1d5bdeeefb81b0626eef3d54017886e803bfeff/rank_0_0/model
+(EngineCore pid=424) INFO 11-25 08:49:48 [monitor.py:62] [dflash_head] torch.compile took 5.25 s in total
+(EngineCore pid=424) INFO 11-25 08:49:48 [monitor.py:91] [dflash_head] Initial profiling/warmup run took 0.00 s
+(EngineCore pid=424) INFO 11-25 08:49:52 [gpu_worker.py:846] Available KV cache memory: 5.66 GiB
+(EngineCore pid=424) INFO 11-25 08:49:52 [kernel_warmup.py:298] JIT kernel warmup starting.
+(EngineCore pid=424) INFO 11-25 08:50:01 [kernel_warmup.py:308] JIT kernel warmup finished in 8.84s.
+(EngineCore pid=424) INFO 11-25 08:50:07 [speculator.py:179] Capturing model for DFlash speculator...
+(EngineCore pid=424) INFO 11-25 08:50:07 [model_runner.py:1246] Graph capturing finished in 2 secs, took 0.21 GiB
+(EngineCore pid=424) INFO 11-25 08:50:07 [gpu_worker.py:1229] Free memory on device (10.77/11.99 GiB) on startup. Desired GPU memory utilization is (0.98, 11.75 GiB). Actual usage is 5.34 GiB for consumed memory (weights + non-torch), 0.75 GiB for peak activation, and 0.21 GiB for CUDAGraph memory. Replace gpu_memory_utilization config with `--kv-cache-memory=5695400326` (5.3 GiB) to fit into requested memory, or `--kv-cache-memory=4638572032` (4.32 GiB) to fully utilize gpu memory. Current kv cache memory in use is 5.66 GiB.
+(EngineCore pid=424) INFO 11-25 08:50:08 [jit_monitor.py:87] Kernel JIT monitor activated; monitored JIT compilations during inference will use mode=warn.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.012ms to complete. Collected 0 objects (out of 0) in GC generation 2.
+(EngineCore pid=424) INFO 11-25 08:50:09 [extensible_kv_cache.py:700] Memory after warmup: 5.11 GiB free, 0.08 GiB committed to the KV cache, 0.75 GiB kept for transient activations (0.75 GiB allocated at peak, 0.44 GiB of torch reservation growth); 336 KV cache blocks (3.36 GiB) fit within the requested 11.75 GiB. Torch may reserve up to 6.78 GiB.
+(EngineCore pid=424) INFO 11-25 08:50:09 [kv_cache_utils.py:1123] GPU KV cache size: 21,504 tokens, Maximum concurrency for 3,072 tokens per request: 7.00x
+(EngineCore pid=424) INFO 11-25 08:50:09 [extensible_kv_cache.py:536] Extended KV cache to 336 blocks (3.36 GiB).
+(EngineCore pid=424) INFO 11-25 08:50:09 [core.py:450] init engine (profile, create kv cache, warmup model) took 50.41 s (compilation: 28.27 s)
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 9.947ms to complete. Collected 51 objects (out of 151793) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.024ms to complete. Collected 0 objects (out of 804) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.017ms to complete. Collected 0 objects (out of 700) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 8.395ms to complete. Collected 0 objects (out of 151667) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.020ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.025ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.012ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.025ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.012ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.011ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.013ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.012ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.012ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.012ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.012ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.023ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.011ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.012ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 11.021ms to complete. Collected 0 objects (out of 151673) in GC generation 2.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.037ms to complete. Collected 0 objects (out of 686) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.021ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.012ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.012ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.023ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.021ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.012ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.023ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.012ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.013ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.013ms to complete. Collected 0 objects (out of 0) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.016ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.015ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.014ms to complete. Collected 0 objects (out of 701) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 1.457ms to complete. Collected 0 objects (out of 194) in GC generation 2.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.004ms to complete. Collected 0 objects (out of 0) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [kernel.py:578] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'], gelu_and_mul_sparse=['triton', 'native'], rotary_embedding=['native'], rotary_embedding_query_only=['native'])
+(MainProcess pid=296) INFO 11-25 08:50:09 [hf.py:754] Detected the chat template content format to be 'string'. You can set `--chat-template-content-format` to override this.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.187ms to complete. Collected 211 objects (out of 513) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.268ms to complete. Collected 211 objects (out of 513) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.225ms to complete. Collected 17 objects (out of 2010) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.313ms to complete. Collected 17 objects (out of 2010) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.061ms to complete. Collected 87 objects (out of 716) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.135ms to complete. Collected 87 objects (out of 716) in GC generation 0.
+(EngineCore pid=424) WARNING 11-25 08:50:09 [jit_monitor.py:143] Triton kernel JIT compilation during inference: _suffix_finalize_kernel. This causes a latency spike; consider extending warmup to cover this shape/config.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.314ms to complete. Collected 408 objects (out of 2282) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.378ms to complete. Collected 408 objects (out of 2282) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.084ms to complete. Collected 132 objects (out of 1118) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.148ms to complete. Collected 132 objects (out of 1118) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.076ms to complete. Collected 41 objects (out of 720) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.140ms to complete. Collected 41 objects (out of 720) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.089ms to complete. Collected 115 objects (out of 702) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.160ms to complete. Collected 115 objects (out of 702) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.148ms to complete. Collected 668 objects (out of 1412) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:09 [gc_utils.py:79] GC took 0.233ms to complete. Collected 668 objects (out of 1412) in GC generation 0.
+(EngineCore pid=424) WARNING 11-25 08:50:10 [jit_monitor.py:143] Triton kernel JIT compilation during inference: _resample_kernel. This causes a latency spike; consider extending warmup to cover this shape/config.
+(EngineCore pid=424) INFO 11-25 08:50:10 [gc_utils.py:79] GC took 0.230ms to complete. Collected 139 objects (out of 2225) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:10 [gc_utils.py:79] GC took 0.301ms to complete. Collected 139 objects (out of 2225) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:10 [gc_utils.py:79] GC took 0.099ms to complete. Collected 179 objects (out of 754) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:10 [gc_utils.py:79] GC took 0.239ms to complete. Collected 179 objects (out of 754) in GC generation 0.
+(EngineCore pid=424) WARNING 11-25 08:50:10 [jit_monitor.py:143] Triton kernel JIT compilation during inference: _hybrid_route_publish_kernel. This causes a latency spike; consider extending warmup to cover this shape/config.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.356ms to complete. Collected 509 objects (out of 2706) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.418ms to complete. Collected 509 objects (out of 2706) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 2.573ms to complete. Collected 2704 objects (out of 5169) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 2.621ms to complete. Collected 2704 objects (out of 5169) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.326ms to complete. Collected 109 objects (out of 3062) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.427ms to complete. Collected 109 objects (out of 3062) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.150ms to complete. Collected 372 objects (out of 756) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.220ms to complete. Collected 372 objects (out of 756) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.110ms to complete. Collected 392 objects (out of 882) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.184ms to complete. Collected 392 objects (out of 882) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.162ms to complete. Collected 728 objects (out of 1002) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.227ms to complete. Collected 728 objects (out of 1002) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.114ms to complete. Collected 654 objects (out of 882) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.181ms to complete. Collected 654 objects (out of 882) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.107ms to complete. Collected 861 objects (out of 999) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.169ms to complete. Collected 861 objects (out of 999) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.162ms to complete. Collected 679 objects (out of 983) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.225ms to complete. Collected 679 objects (out of 983) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.267ms to complete. Collected 633 objects (out of 3125) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.376ms to complete. Collected 633 objects (out of 3125) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.076ms to complete. Collected 283 objects (out of 716) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.171ms to complete. Collected 283 objects (out of 716) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.113ms to complete. Collected 478 objects (out of 838) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.205ms to complete. Collected 478 objects (out of 838) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.117ms to complete. Collected 516 objects (out of 989) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.183ms to complete. Collected 516 objects (out of 989) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.714ms to complete. Collected 1678 objects (out of 4580) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.677ms to complete. Collected 1678 objects (out of 4580) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.121ms to complete. Collected 861 objects (out of 1173) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.203ms to complete. Collected 861 objects (out of 1173) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.116ms to complete. Collected 903 objects (out of 1064) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:11 [gc_utils.py:79] GC took 0.191ms to complete. Collected 903 objects (out of 1064) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.312ms to complete. Collected 264 objects (out of 2310) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.358ms to complete. Collected 264 objects (out of 2310) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.071ms to complete. Collected 94 objects (out of 736) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.180ms to complete. Collected 94 objects (out of 736) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.370ms to complete. Collected 126 objects (out of 3096) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.482ms to complete. Collected 126 objects (out of 3096) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.086ms to complete. Collected 386 objects (out of 752) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.216ms to complete. Collected 386 objects (out of 752) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.159ms to complete. Collected 385 objects (out of 872) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.283ms to complete. Collected 385 objects (out of 872) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.123ms to complete. Collected 725 objects (out of 990) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.180ms to complete. Collected 725 objects (out of 990) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.104ms to complete. Collected 668 objects (out of 908) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.177ms to complete. Collected 668 objects (out of 908) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.091ms to complete. Collected 868 objects (out of 1045) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.139ms to complete. Collected 868 objects (out of 1045) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.081ms to complete. Collected 658 objects (out of 962) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.132ms to complete. Collected 658 objects (out of 962) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.882ms to complete. Collected 1438 objects (out of 3568) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.912ms to complete. Collected 1438 objects (out of 3568) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.070ms to complete. Collected 304 objects (out of 856) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.126ms to complete. Collected 304 objects (out of 856) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.098ms to complete. Collected 509 objects (out of 983) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.155ms to complete. Collected 509 objects (out of 983) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.108ms to complete. Collected 529 objects (out of 998) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.165ms to complete. Collected 529 objects (out of 998) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.102ms to complete. Collected 862 objects (out of 1067) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.147ms to complete. Collected 862 objects (out of 1067) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.113ms to complete. Collected 861 objects (out of 1155) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:13 [gc_utils.py:79] GC took 0.158ms to complete. Collected 861 objects (out of 1155) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.900ms to complete. Collected 1006 objects (out of 3070) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.599ms to complete. Collected 1006 objects (out of 3070) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.069ms to complete. Collected 94 objects (out of 738) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.151ms to complete. Collected 94 objects (out of 738) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.423ms to complete. Collected 126 objects (out of 3096) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.540ms to complete. Collected 126 objects (out of 3096) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.073ms to complete. Collected 386 objects (out of 752) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.138ms to complete. Collected 386 objects (out of 752) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.153ms to complete. Collected 385 objects (out of 872) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.212ms to complete. Collected 385 objects (out of 872) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.182ms to complete. Collected 718 objects (out of 993) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.385ms to complete. Collected 718 objects (out of 993) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.825ms to complete. Collected 1033 objects (out of 6822) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.757ms to complete. Collected 1033 objects (out of 6822) in GC generation 1.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.105ms to complete. Collected 945 objects (out of 1183) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:15 [gc_utils.py:79] GC took 0.160ms to complete. Collected 945 objects (out of 1183) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.091ms to complete. Collected 833 objects (out of 1043) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.142ms to complete. Collected 833 objects (out of 1043) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.184ms to complete. Collected 381 objects (out of 2873) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.285ms to complete. Collected 381 objects (out of 2873) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.052ms to complete. Collected 283 objects (out of 716) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.109ms to complete. Collected 283 objects (out of 716) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.122ms to complete. Collected 478 objects (out of 838) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.191ms to complete. Collected 478 objects (out of 838) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.133ms to complete. Collected 516 objects (out of 989) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.216ms to complete. Collected 516 objects (out of 989) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.117ms to complete. Collected 803 objects (out of 1033) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.181ms to complete. Collected 803 objects (out of 1033) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.111ms to complete. Collected 861 objects (out of 1172) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.164ms to complete. Collected 861 objects (out of 1172) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.090ms to complete. Collected 903 objects (out of 1073) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:16 [gc_utils.py:79] GC took 0.141ms to complete. Collected 903 objects (out of 1073) in GC generation 0.
+(MainProcess pid=296) INFO 11-25 08:50:20 [loggers.py:347] Engine 000: Avg prompt throughput: 235.9 tokens/s, Avg generation throughput: 478.7 tokens/s, Running: 4 reqs, Waiting: 0 reqs, Finished: 12 reqs, GPU KV cache usage: 6.6%
+(MainProcess pid=296) INFO 11-25 08:50:20 [metrics.py:136] SpecDecoding metrics: Mean acceptance length: 5.39, Accepted throughput: 392.19 tokens/s, Drafted throughput: 1341.56 tokens/s, Accepted: 4214 tokens, Drafted: 14415 tokens, Verified: 14415 tokens, Per-position acceptance rate: 0.835, 0.665, 0.516, 0.405, 0.332, 0.284, 0.240, 0.211, 0.180, 0.158, 0.142, 0.124, 0.112, 0.098, 0.083, Avg Draft acceptance rate: 29.2%
+(EngineCore pid=424) INFO 11-25 08:50:20 [gc_utils.py:79] GC took 0.157ms to complete. Collected 247 objects (out of 728) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:20 [gc_utils.py:79] GC took 0.211ms to complete. Collected 247 objects (out of 728) in GC generation 0.
+WAVE_RESULT={"wave": "cold", "seconds": 11.465066481999884, "output_tokens": 6061, "output_tokens_per_second": 528.6493549353377, "accepted_per_draft": 4.43900267141585}
+(EngineCore pid=424) INFO 11-25 08:50:21 [gc_utils.py:79] GC took 0.118ms to complete. Collected 0 objects (out of 540) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:21 [gc_utils.py:79] GC took 0.202ms to complete. Collected 0 objects (out of 540) in GC generation 0.
+WAVE_RESULT={"wave": "hot-1", "seconds": 6.266430739000043, "output_tokens": 6052, "output_tokens_per_second": 965.7810406064967, "accepted_per_draft": 4.696828358208955}
+(MainProcess pid=296) INFO 11-25 08:50:30 [loggers.py:347] Engine 000: Avg prompt throughput: 388.7 tokens/s, Avg generation throughput: 991.0 tokens/s, Running: 4 reqs, Waiting: 6 reqs, Finished: 26 reqs, GPU KV cache usage: 6.6%
+(MainProcess pid=296) INFO 11-25 08:50:30 [metrics.py:136] SpecDecoding metrics: Mean acceptance length: 5.83, Accepted throughput: 828.78 tokens/s, Drafted throughput: 2572.55 tokens/s, Accepted: 8307 tokens, Drafted: 25785 tokens, Verified: 25785 tokens, Per-position acceptance rate: 0.828, 0.672, 0.551, 0.455, 0.389, 0.329, 0.283, 0.244, 0.213, 0.185, 0.167, 0.147, 0.132, 0.121, 0.114, Avg Draft acceptance rate: 32.2%
+WAVE_RESULT={"wave": "hot-2", "seconds": 5.873949696999944, "output_tokens": 6059, "output_tokens_per_second": 1031.5035559624505, "accepted_per_draft": 5.012770137524558}
+UPSTREAM_BENCH_RESULT={"family": "dflash", "mode": "splice", "model": "/root/qwen35-9b-deploy/models/Qwen3-4B-FP8", "target_revision": null, "draft_revision": null, "draft_model": "/root/qwen35-9b-deploy/models/Qwen3-4B-DFlash-b16", "temperature": 0.8, "top_p": 1.0, "top_k": -1, "ignore_eos": false, "max_tokens": 384, "prefix_len": 1, "corpus_tokens": 65536, "corpus_key_mode": "dual", "batch_size": 4, "max_model_len": 3072, "gpu_memory_utilization": 0.98, "num_speculative_tokens": 15, "profile_stages": false, "profile_host": null, "native_spec_metrics": null, "native_iteration_details": null, "warmup_wave": null, "wsl_pin_memory": null, "results": {"speed_coding": {"ids": ["ecf92ab7acf1492da70e68fcddd9d0b7", "5ace1d46a306452da3c517a7a8bc2093", "709706096071415b9f3bd1d558693d1f", "182e7a241cd64f309a013f89f2dde604", "326e163b8bc24f74abf125254d60051b", "4ca88202f05d4923b0fa2dcb3b6b637a", "6be05541db3a4c8f8e82169353ed6aa2", "73c564f6e702456fa85e903de4824d3c", "76dfa9e332124de5a5403fcf51e61050", "22f088e74c284523b965617fa401840a", "126235195ce847b09b1dab1507421e64", "c49bd7aa449844da8c67a1bb6797314e", "68a3c3535f404350a2ece3e8c62211b5", "f2bf4c564d0d42a39241e98a4e6c493f", "22f2c7dc2f7745e2857160543c2cf401", "0daf539b787c4dccbb547330a8b4c3d7"], "prompt_tokens": [402, 40, 114, 174, 285, 106, 86, 30, 124, 221, 139, 276, 134, 169, 179, 56], "waves": [{"wave": "cold", "start_timestamp": 1795567809.6962273, "end_timestamp": 1795567821.161295, "seconds": 11.465066481999884, "output_tokens": 6061, "output_tokens_per_second": 528.6493549353377, "token_counts": [384, 384, 384, 384, 384, 384, 376, 384, 384, 384, 384, 384, 384, 384, 379, 314], "token_hashes": ["8187cf9886062b97408bbfec87fff13395c4ed19d356c793da3d449d99d42c3a", "e4c110c8c12df93ac5e1a3c75a558adbeb2188aa36b246fd023f3280d681c841", "d8242f750698b9963139ae2cc4006a1745dbeb6af9376614ed226b6c66eb71b9", "6209b73593a3a02705781737f44b19570cb1c5475254698527f922f3c4868e4c", "7fc85aaa2032efcf67687e62b1662ba6965cc507d35511f5c8256e1cd42f8808", "94c2c65b15e438ebefad9c4b2fe417931155dd253a90bcede2a3e1ace5df7ec4", "7a53ace255e998ec8a3b554dfe285e6b88a5c5b49b9ed840e48c64d78ca08dfa", "38adfe9df5bfffbce94d3480504c511f0a8c5282bcbf5acb50f612303bd4f5bc", "59adee1d0cd60ec4db4fa3358759ce1bb781a6fd4aaa350f5c9719238885ec1a", "1d9c1fff687f45c7b7cda149ca522acd34f47e3bc997b03757fc500ad94b7a13", "ced56db633ec210c29d7e6a884fffd913579a2bf826a8956d327ac6ed644b2f6", "1bd754162a0c1f5f6b040f0edc0710184d16a453b5c27cd82b9870990b56577e", "b97ad008349b2c8bf2977f1474f7d12c5d9ec1ffe08bd981ad192d5b8611a67d", "826aa3a4e8f3233ee4ac4b0301d88506df56482264db986a8c1beb415ca1622d", "c034e64768d438ee5e3e73017e03c0d020ca7aace69a4e710fa46010a04f300e", "863dbbc8f91749280817db903cf4fea5e70e5dd3dd5caa848b42cac4e917d2d4"], "finish_reasons": {"length": 13, "stop": 3}, "spec_metrics": {"vllm:spec_decode_num_drafts": 1123, "vllm:spec_decode_num_draft_tokens": 16845, "vllm:spec_decode_num_accepted_tokens": 4985}, "accepted_per_draft": 4.43900267141585, "draft_token_acceptance": 0.29593351142772334}, {"wave": "hot-1", "start_timestamp": 1795567821.1647935, "end_timestamp": 1795567827.431225, "seconds": 6.266430739000043, "output_tokens": 6052, "output_tokens_per_second": 965.7810406064967, "token_counts": [384, 384, 384, 384, 384, 384, 384, 376, 384, 384, 384, 384, 384, 384, 383, 301], "token_hashes": ["4b9dc09bdd6912bf077fac0c26df2e14571ad9a3d8c4af324c462e909dbf53b3", "31f13d8a594cebd1c73ab605713bd4c88a3428f5522bf7ef5ef951b214a99e6c", "c55dbf24495a597b6b116ab2d38b98a975f6778915692ea75fb863eed4d4df6f", "bbdeb951ecabde7ba2297c0dcf9da6807188591251225a1eea9b8c1d67f32f20", "324e29538419f411a9a5fcf1d0608952a82ca22d4728ae6652ab04e84017d967", "cc28cd4778c063d0743b7f1d8d45f37b67e584502f3522253e404f2bb9148140", "2ff7d36c71ffa98878f6a9916a48e1a5758a0b014385a2f754d771df2f5b6504", "685825b1d4d1abde60ef6ec37f6aa2c1d885a38c238daa3b905d9dc97c8c99c7", "9c22f43ecf0a49c2bb3d9e34cb2cfb79fee6ab9d61a9d1e9f509a1cf6c5329af", "31a827e29987dbdf74ef5582d0710abada04bddf1218397c843db12b305f3268", "8cef6253121a52fe5af643179885c5f94de3427abf510c92552b6f6f875c8bf9", "fe2b189c33bf6bc25e63f830d4c2c7702e0cf4b2b6e7981a7ff82ff9234905db", "14c955abd357170f205c0890302d07fecb719e91f7f40490c4b0334603ce046d", "e99e87b85b423484a8bcd9a3e5052b8cbcd8152109a14356b334082685b0ac40", "c97b4071ed1ab0919b61aef39747cb8489decd4234501a09aa550e4e1a73e20e", "8f926d200606b1006c77c8aeac80ebf8be439c0e56ff0f1aa8e9477a5180b5ad"], "finish_reasons": {"length": 13, "stop": 3}, "spec_metrics": {"vllm:spec_decode_num_drafts": 1072, "vllm:spec_decode_num_draft_tokens": 16080, "vllm:spec_decode_num_accepted_tokens": 5035}, "accepted_per_draft": 4.696828358208955, "draft_token_acceptance": 0.3131218905472637}, {"wave": "hot-2", "start_timestamp": 1795567827.4342906, "end_timestamp": 1795567833.3082407, "seconds": 5.873949696999944, "output_tokens": 6059, "output_tokens_per_second": 1031.5035559624505, "token_counts": [384, 384, 384, 384, 384, 384, 384, 384, 384, 384, 384, 384, 384, 384, 384, 299], "token_hashes": ["397c47c6a2b07908ce3805772c8910afc678e674b2c510d5687c5f3b732959a5", "29ed8379462458bb305840e9cca9e3e747673cf4fdc6462c615cad021b101092", "bccf4c8f99ff597fd7254ca493eb64f165ec7b91876866b5998619471c7fa67d", "b7cef0c6b581b847bb07cf78dc10ba25e6add886b2fb3549c98e6a6c0798b1f5", "746d0f6d707f7b6ae066e1a059d50f857c375f4ac4757e37e972e3a074c74836", "157fb26d73571a3def1dbeef0caa7bb2b354ad82885c6f352f6e611a5c9c932f", "0f122f5479b0990dd11a8a7c993b72af9f1cbec357f6424fd0c4e31507fa314b", "f21280f8f7b83153a19681dec2a96532a41373846f3a9dfc5564ce3183838b8e", "9e88861a9f13bc530a586af31ea3c9effbdacc5c24c8fb9fc092c58c6dd873bc", "ea97b9c8961b8cc3ddca419f9fb04f740a480ac4c58d98cd7c0d81eefee6fb1f", "f7d2e5a663d90b4bcdaea857f9049b25b26c4afc092d6cf195ee7a568086b310", "642682c7b562793e4f07e8511116df1cff84766ae44fa05891d8eb77687c1cce", "805fc5146eb73413b917049fbb4e3d0b35adbdd26aefe229d1f4513214e2e408", "e9466bf8d328152844143a7ee26b2a201092c862407ed7fad6c26b346b3dd31c", "a663382a25fbfc6218b5c82ff92e276cbf17da97621ede41563c7a04bb40ccbc", "5a73995108bff0768dd972346f96bf7f85fb51a50dac31e9e59c1d024493002c"], "finish_reasons": {"length": 15, "stop": 1}, "spec_metrics": {"vllm:spec_decode_num_drafts": 1018, "vllm:spec_decode_num_draft_tokens": 15270, "vllm:spec_decode_num_accepted_tokens": 5103}, "accepted_per_draft": 5.012770137524558, "draft_token_acceptance": 0.3341846758349705}], "hybrid_stats": {"model_accepted": 5219, "model_observed": 5764, "suffix_accepted": 1373, "suffix_observed": 1517}}}}
+(MainProcess pid=296) INFO 11-25 08:50:33 [utils.py:659] [shutdown] Process manager: send sigterm to process EngineCore
+(EngineCore pid=424) INFO 11-25 08:50:33 [core.py:1718] [shutdown] EngineCore: trigger received signal=SIGTERM
+(EngineCore pid=424) INFO 11-25 08:50:33 [core.py:1916] [shutdown] EngineCore: start mode=abort timeout=0s
+(EngineCore pid=424) INFO 11-25 08:50:33 [core.py:1947] [shutdown] EngineCore: request processing complete; starting resource teardown
+(EngineCore pid=424) INFO 11-25 08:50:33 [core.py:1766] [shutdown] EngineCore: exiting busy loop
+(EngineCore pid=424) INFO 11-25 08:50:33 [gc_utils.py:79] GC took 514.131ms to complete. Collected 4992 objects (out of 1580464) in GC generation 2.
+(EngineCore pid=424) INFO 11-25 08:50:33 [gc_utils.py:79] GC took 447.318ms to complete. Collected 4992 objects (out of 1580464) in GC generation 2.
+(EngineCore pid=424) INFO 11-25 08:50:34 [gc_utils.py:79] GC took 509.171ms to complete. Collected 43012 objects (out of 1576275) in GC generation 2.
+(EngineCore pid=424) INFO 11-25 08:50:34 [gc_utils.py:79] GC took 444.726ms to complete. Collected 43012 objects (out of 1576275) in GC generation 2.
+(EngineCore pid=424) INFO 11-25 08:50:34 [gc_utils.py:79] GC took 0.293ms to complete. Collected 0 objects (out of 1266) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:34 [gc_utils.py:79] GC took 0.280ms to complete. Collected 0 objects (out of 1266) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:34 [gc_utils.py:79] GC took 0.180ms to complete. Collected 0 objects (out of 958) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:34 [gc_utils.py:79] GC took 0.201ms to complete. Collected 0 objects (out of 958) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:34 [gc_utils.py:79] GC took 0.179ms to complete. Collected 0 objects (out of 936) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:34 [gc_utils.py:79] GC took 0.198ms to complete. Collected 0 objects (out of 936) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:34 [gc_utils.py:79] GC took 0.187ms to complete. Collected 0 objects (out of 985) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:34 [gc_utils.py:79] GC took 0.202ms to complete. Collected 0 objects (out of 985) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:34 [gc_utils.py:79] GC took 0.111ms to complete. Collected 0 objects (out of 929) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:34 [gc_utils.py:79] GC took 0.154ms to complete. Collected 0 objects (out of 929) in GC generation 0.
+(EngineCore pid=424) INFO 11-25 08:50:35 [gc_utils.py:79] GC took 481.557ms to complete. Collected 10 objects (out of 1522086) in GC generation 2.
+(EngineCore pid=424) INFO 11-25 08:50:35 [gc_utils.py:79] GC took 419.384ms to complete. Collected 10 objects (out of 1522086) in GC generation 2.

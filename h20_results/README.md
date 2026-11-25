@@ -134,6 +134,26 @@ warmup 前后的 splice token 哈希仍完全一致，因此 warmup 改变了 JI
 消除 Coding hot-1 空泡；该问题继续由 host-only 逐步计时定位，不能将第二轮单独视为
 稳定结论。
 
+## Coding hot 波次的 JIT 根因与固定宽度修复
+
+后续用 vLLM 原生逐请求指标还原了快轨迹：Coding hot-1 共 1054 次 verify、单请求最多
+101 轮；原生 iteration 日志为 297 步，GPU elapsed 约 6.198 s、墙钟约 6.248 s，未显示
+接受量或尾批异常。`VLLM_GC_DEBUG=1` 在 hot 中只发现毫秒级 GC，数百毫秒回收发生在
+进程退出阶段，因此 GC 不是该 hot 停顿根因。
+
+更关键的是默认 JIT monitor 使用 `warning_once`，会隐藏同一函数的新 constexpr/形状变体。
+`jit_monitor_verbose=True` 后在 Coding hot-1 明确看到 `_suffix_finalize_kernel` 的
+`NB_PO2=1` 编译；完整数据顺序还出现 `NB_PO2=2/4/8/16`。此前“hot 没有 JIT”的判断不成立。
+
+修复将扫描网格继续限制为本轮 `num_scan_blocks`，但 finalize 的归约宽度固定为
+`next_power_of_2(self.n_blocks)`，并用本轮块数掩码，同时禁止 `num_blocks` 特化。固定宽度
+保持 R5 陈旧 scratch 防护，避免历史长度变化产生新 JIT。42/42 kernel 回归通过，三类数据
+所有波次 token 哈希和投机计数与修复前一致。修复后日志只剩一个固定 `NB_PO2=16` 初始化
+事件；Coding hot-1/2 分别为 6.159→6.172 s、5.948→5.962 s，热态无额外回退。Blazedit
+首次 cold 增加约 1.4 s 是固定 kernel 的首次初始化，不影响 hot。常规第二轮 Coding
+hot-1/2 为 6.167/5.946 s，与 verbose 轮一致；相对同一 pure 基线，Blazedit、Coding、
+RAG 分别为 **+14.82%、+3.75%、+19.41%**。详见 `coding_fixednb_summary.md`。
+
 ## 文件
 
 - `environment.txt`：H20 型号、显存、系统、磁盘与代码状态。

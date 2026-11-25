@@ -33,7 +33,7 @@ index bdd44141de..e9f4371779 100644
      assert 9 not in spec.corpus
      assert 10 not in spec.corpus
 diff --git a/vllm/v1/worker/gpu/spec_decode/suffix/speculator.py b/vllm/v1/worker/gpu/spec_decode/suffix/speculator.py
-index 89eacf7cde..ec7a7aa480 100644
+index 89eacf7cde..1e142a2633 100644
 --- a/vllm/v1/worker/gpu/spec_decode/suffix/speculator.py
 +++ b/vllm/v1/worker/gpu/spec_decode/suffix/speculator.py
 @@ -15,8 +15,9 @@ Extends the n-gram speculator with the two parts of SuffixDecoding
@@ -48,6 +48,15 @@ index 89eacf7cde..ec7a7aa480 100644
  TP rank holds an identical corpus without any collective.
  """
  
+@@ -438,7 +439,7 @@ def _corpus_draft(
+     )
+ 
+ 
+-@triton.jit
++@triton.jit(do_not_specialize=["num_blocks"])
+ def _suffix_finalize_kernel(
+     token_ids_ptr,  # *int32  [max_num_reqs, token_ids_stride]
+     token_ids_stride,
 @@ -625,7 +626,7 @@ def _suffix_observe_kernel(
  def _suffix_ingest_kernel(
      token_ids_ptr,  # *int32  [max_num_reqs, token_ids_stride]
@@ -138,3 +147,13 @@ index 89eacf7cde..ec7a7aa480 100644
              self.corpus,
              self.corpus_len,
              self.corpus_head,
+@@ -1011,7 +1009,8 @@ class SuffixSpeculator(BaseSpeculator):
+             DEPTH_PO2=triton.next_power_of_2(self.max_depth),
+             K=num_tokens,
+             K_PO2=max(1, triton.next_power_of_2(num_tokens)),
+-            NB_PO2=max(1, triton.next_power_of_2(num_scan_blocks)),
++            # Keep the JIT signature stable; num_scan_blocks masks stale slots.
++            NB_PO2=max(1, triton.next_power_of_2(self.n_blocks)),
+             KEY_MODE=self.corpus_key_mode if require_full else 0,
+             num_warps=4,
+         )

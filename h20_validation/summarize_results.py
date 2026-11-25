@@ -65,6 +65,9 @@ def main():
         "gpu_memory_utilization",
         "profile_stages",
         "profile_host",
+        "native_spec_metrics",
+        "native_iteration_details",
+        "jit_verbose",
         "warmup_wave",
         "wsl_pin_memory",
     ):
