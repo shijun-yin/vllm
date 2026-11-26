@@ -2599,7 +2599,10 @@ class Scheduler(SchedulerInterface):
                 final_token_length = request.num_tokens
                 finished = self._handle_stopped_request(request)
                 if finished:
-                    if request.sampling_params.stop:
+                    if (
+                        request.sampling_params is not None
+                        and request.sampling_params.stop
+                    ):
                         self.finished_req_corpus_excluded_ids.add(req_id)
                     self.finished_req_token_lengths[req_id] = final_token_length
                     kv_transfer_params, ec_transfer_params = self._free_request(request)

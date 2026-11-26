@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import json
 import math
 from collections import Counter, defaultdict
 from statistics import median
@@ -9,6 +10,7 @@ import pytest
 import regex as re
 from scipy.stats import chi2_contingency
 
+import vllm.envs as envs
 from tests.utils import single_gpu_only
 from vllm import SamplingParams
 from vllm.logprobs import Logprob
@@ -225,17 +227,24 @@ def check_splice_affected_positions(outputs_by_mode, events):
             event["draft"]
         ):
             positions.append(("rejected", event["accepted"]))
-        for kind, position in positions:
+        for kind, draft_offset in positions:
+            position = event["start"] + draft_offset
             if position >= len(token_ids):
                 continue
+            if kind == "accepted":
+                assert token_ids[position] == event["draft"][draft_offset], (
+                    f"Accepted draft mismatch at {position}: "
+                    f"{token_ids[position]} != {event['draft'][draft_offset]}"
+                )
             prefix = tuple(token_ids[:position])
             affected[kind].add((position, prefix))
             sampled_token = token_ids[position]
             event_logprobs.append((kind, event, position, prefix, sampled_token))
 
     compared = {"accepted": 0, "rejected": 0}
+    distribution_groups = []
     for kind, groups in affected.items():
-        for position, prefix in groups:
+        for position, prefix in sorted(groups):
             samples = {
                 mode: _conditional_tokens(outputs, position, prefix)
                 for mode, outputs in outputs_by_mode.items()
@@ -249,6 +258,14 @@ def check_splice_affected_positions(outputs_by_mode, events):
                 Counter(samples["native"]), Counter(samples["splice"])
             )
             compared[kind] += 1
+            distribution_groups.append(
+                {
+                    "kind": kind,
+                    "position": position,
+                    "prefix": list(prefix),
+                    "samples": {mode: len(sample) for mode, sample in samples.items()},
+                }
+            )
     assert all(compared.values()), (
         f"Insufficient affected distribution groups: {compared}"
     )
@@ -271,14 +288,22 @@ def check_splice_affected_positions(outputs_by_mode, events):
             logprob_errors[kind, mode].append(abs(splice_logprob - other_logprob))
             matched[kind, mode] += 1
     assert all(matched.values()), f"Insufficient affected logprob checks: {matched}"
+    logprob_report = {}
     for (kind, mode), errors in logprob_errors.items():
         drift = median(errors)
         assert drift <= 0.1, f"{kind} logprob drift at {mode}: {drift}; errors={errors}"
+        logprob_report[f"{kind}:{mode}"] = {
+            "matches": matched[kind, mode],
+            "median_absolute_error": drift,
+        }
+    return {
+        "events": len(events),
+        "distribution_groups": distribution_groups,
+        "logprobs": logprob_report,
+    }
 
 
-def _splice_test_output(request_id, second_logprob):
-    tokens = [10, 20, 30]
-    logprobs = [-0.1, -0.15, second_logprob]
+def _splice_sequence_output(request_id, tokens, logprobs):
     completion = CompletionOutput(
         index=0,
         text="",
@@ -291,6 +316,49 @@ def _splice_test_output(request_id, second_logprob):
         finish_reason="stop",
     )
     return RequestOutput(request_id, None, [], None, [completion], True)
+
+
+def _splice_test_output(request_id, second_logprob):
+    return _splice_sequence_output(
+        request_id, [10, 20, 30], [-0.1, -0.15, second_logprob]
+    )
+
+
+def _splice_nonzero_start_case(logprob_position=None, accepted_token_mutation=False):
+    base_tokens = [1, 2, 3, 10, 20, 30]
+    base_logprobs = [-0.01, -0.02, -0.03, -0.1, -0.15, -0.2]
+    splice_tokens = list(base_tokens)
+    splice_logprobs = list(base_logprobs)
+    if accepted_token_mutation:
+        splice_tokens[4] = 99
+    if logprob_position is not None:
+        splice_logprobs[logprob_position] = -10.0
+    outputs_by_mode = {
+        "target": [
+            _splice_sequence_output(f"req-{index}", base_tokens, base_logprobs)
+            for index in range(10)
+        ],
+        "native": [
+            _splice_sequence_output(f"req-{index}", base_tokens, base_logprobs)
+            for index in range(10)
+        ],
+        "splice": [
+            _splice_sequence_output(f"req-{index}", splice_tokens, splice_logprobs)
+            for index in range(10)
+        ],
+    }
+    events = [
+        {
+            "request_id": f"req-{index}",
+            "start": 3,
+            "draft": [10, 20, 31],
+            "accepted": 2,
+            "rejected": True,
+            "prefix_len": 1,
+        }
+        for index in range(10)
+    ]
+    return outputs_by_mode, events
 
 
 def test_splice_affected_logprobs_rejects_mutation():
@@ -314,11 +382,38 @@ def test_splice_affected_logprobs_rejects_mutation():
         check_splice_affected_positions(outputs_by_mode, events)
 
 
+@pytest.mark.parametrize(
+    ("position", "message"),
+    [(4, "accepted logprob drift"), (5, "rejected logprob drift")],
+)
+def test_splice_affected_rejects_nonzero_start_mutation(position, message):
+    outputs_by_mode, events = _splice_nonzero_start_case(position)
+    with pytest.raises(AssertionError, match=message):
+        check_splice_affected_positions(outputs_by_mode, events)
+
+
+def test_splice_affected_ignores_pre_start_mutation():
+    outputs_by_mode, events = _splice_nonzero_start_case(logprob_position=2)
+    report = check_splice_affected_positions(outputs_by_mode, events)
+    assert report["events"] == 10
+    assert {group["position"] for group in report["distribution_groups"]} == {4, 5}
+    assert report["logprobs"]["accepted:target"]["matches"] == 10
+
+
+def test_splice_affected_checks_accepted_draft_token():
+    outputs_by_mode, events = _splice_nonzero_start_case(accepted_token_mutation=True)
+    with pytest.raises(AssertionError, match="Accepted draft mismatch at 4"):
+        check_splice_affected_positions(outputs_by_mode, events)
+
+
 @pytest.mark.parametrize("async_scheduling", [False, True], ids=["sync", "async"])
 @single_gpu_only
 def test_splice_real_switch_preserves_sampling_distribution(
-    async_scheduling, vllm_runner
+    async_scheduling, vllm_runner, monkeypatch: pytest.MonkeyPatch
 ):
+    batch_invariant = current_platform.is_cuda()
+    monkeypatch.setenv("VLLM_BATCH_INVARIANT", str(int(batch_invariant)))
+    monkeypatch.setattr(envs, "VLLM_BATCH_INVARIANT", batch_invariant)
     splice_config = {
         "method": "dflash",
         "model": "z-lab/Qwen3-4B-DFlash-b16",
@@ -385,7 +480,9 @@ def test_splice_real_switch_preserves_sampling_distribution(
                 assert corpus_observed > 0
                 splice_events = runner.llm.collective_rpc("read_splice_trace")[0]
             outputs_by_mode[mode] = outputs
-    check_splice_affected_positions(outputs_by_mode, splice_events)
+    report = check_splice_affected_positions(outputs_by_mode, splice_events)
+    report["batch_invariant"] = envs.VLLM_BATCH_INVARIANT
+    print("SPLICE_AFFECTED_CHECK=" + json.dumps(report, sort_keys=True))
 
 
 def assert_grammar_distribution_unchanged(counts1: Counter[str], counts2: Counter[str]):

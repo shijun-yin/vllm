@@ -667,6 +667,44 @@ def test_pooling_chunked_prefill_can_finish_at_max_model_len():
     assert scheduler.schedule().num_scheduled_tokens == {"pool": 4}
 
 
+def test_pooling_completion_returns_output_and_frees_request():
+    scheduler = create_scheduler(runner="pooling")
+    request = Request(
+        request_id="pool",
+        prompt_token_ids=[1, 2, 3],
+        sampling_params=None,
+        pooling_params=PoolingParams(task="embed"),
+    )
+    scheduler.add_request(request)
+    scheduler_output = scheduler.schedule()
+    embedding = torch.tensor([0.25, 0.5])
+
+    engine_outputs = scheduler.update_from_output(
+        scheduler_output,
+        ModelRunnerOutput(
+            req_ids=[request.request_id],
+            sampled_token_ids=[[]],
+            pooler_output=[embedding],
+        ),
+    )
+
+    [output] = engine_outputs[0].outputs
+    assert output.request_id == request.request_id
+    assert output.pooling_output is embedding
+    assert output.new_token_ids == []
+    assert output.finish_reason == FinishReason.STOP
+    assert request.status == RequestStatus.FINISHED_STOPPED
+    assert request.request_id not in scheduler.requests
+    assert scheduler.running == []
+
+    next_output = scheduler.schedule()
+    assert next_output.finished_req_ids == {request.request_id}
+    assert next_output.finished_req_token_lengths == {
+        request.request_id: request.num_tokens
+    }
+    assert next_output.suffix_corpus_excluded_req_ids == set()
+
+
 def test_scheduler_stats_route_to_existing_output_client():
     scheduler = create_scheduler()
     request = create_requests(num_requests=1)[0]
