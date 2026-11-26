@@ -194,8 +194,8 @@ logprob 中位误差均为 0.0，实际比较位置包含 2、3、5、6。原始
 `reviewfix2_r4_sync_batch_invariant.log`（单项诊断）和
 `reviewfix2_r4_sync_async.log`（最终两组）。
 
-上述改动没有重跑 4070 性能；下节性能仍明确归属于 `615057195c`。最新提交的 H20
-三组性能验收及 PP/PCP 实机覆盖仍待执行。
+下节首先保留 `615057195c` 的历史配对；`4feaf2e05a` 的最新 4070 复跑见随后一节。
+最新提交的 H20 三组性能验收及 PP/PCP 实机覆盖仍待执行。
 
 ### 615057195c 的 RTX 4070 同期配对
 
@@ -219,6 +219,31 @@ pure→splice，第二轮为 splice→pure，四个进程均关闭分段打点�
 
 原始文件为 `reviewfix_pair1_pure.{json,log}`、`reviewfix_pair1_splice.{json,log}`、
 `reviewfix_pair2_splice.{json,log}`、`reviewfix_pair2_pure.{json,log}`。
+
+### 4feaf2e05a 的 RTX 4070 复跑
+
+在 pooling 与 R4 修复后的最终代码 `4feaf2e05a559b346935151f688270e0e491becb` 上，
+按完全相同的模型、采样、B4、独立 warmup、无打点和交替进程顺序再次执行四组进程。
+两轮 pure 和 splice 的逐请求 token 哈希、投机计数分别完全一致，也与上节
+`615057195c` 的对应模式一致，因此以下差异均来自时间项而不是生成轨迹变化。
+
+| 数据集 | 第一轮 pure/splice tok/s | 第一轮 Delta | 第二轮 pure/splice tok/s | 第二轮 Delta | AL P/S |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Blazedit | 731.20 / 847.36 | +15.89% | 739.29 / 843.28 | +14.07% | 6.885 / 8.783 |
+| SPEED Coding | 972.37 / 987.22 | +1.53% | 948.92 / 1002.91 | +5.69% | 4.566 / 4.839 |
+| SPEED RAG | 376.24 / 448.58 | +19.23% | 370.05 / 444.47 | +20.11% | 1.922 / 2.568 |
+
+Coding 的 splice hot-1 两轮为 6.183/6.190 s，hot-2 为 6.051/5.853 s，未复现旧版约
+8 s 慢波次。两轮 pure hot-1/2 分别为 6.180/6.229 s 和 6.369/6.347 s；第二轮纯基线
+较慢且 splice hot-2 较快，使配对收益由 +1.53% 变为 +5.69%。Blazedit 第一轮 pure
+hot-2 也有 8.553 s 的小幅慢波，另三轮为 8.253–8.354 s。Coding 两次方向均为正，但
+增益幅度仍受约 2% 的执行时间漂移影响；Blazedit 和 RAG 的方向及量级较稳定。第二轮 pure
+启动时有 TritonBundler cubin 缺失告警，随后正常编译加载并完成预热；两组 pure 的
+`_resample_kernel` JIT 均发生在预热阶段，正式 hot 无新增 JIT 告警，不能将启动告警直接
+视为 hot 漂移的解释。该结果不外推到 H20、DFlash2 或更高实际并发。
+
+原始文件为 `perf4fe_pair1_pure.{json,log}`、`perf4fe_pair1_splice.{json,log}`、
+`perf4fe_pair2_splice.{json,log}`、`perf4fe_pair2_pure.{json,log}`。
 
 ## 文件
 
