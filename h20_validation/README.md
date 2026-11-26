@@ -27,8 +27,9 @@
   `../h20_results/current_h20/`；旧盘恢复的历史结果位于 `../h20_results/previous_h20/`。
 - 模型、venv、源码和数据均复用旧盘，没有重新下载；每个进程结束后均单独回传结果。
   结果解释和剩余限制见 `../h20_results/README.md`。
-- 后续审查发现的 R5/R8/动态 K、独立 suffix 采样边界及字符串 stop 入库资格已在本地修复
-  并完成回归；H20 上述结果仍对应 `35359f54`，最新 patch 的 H20 性能复测需要在新设备上执行。
+- 后续审查发现的 R5/R8/动态 K、独立 suffix 采样边界、字符串 stop 入库资格、pooling 完成
+  及 R4 绝对坐标已在本地修复并完成回归；H20 上述结果仍对应 `35359f54`，最新 patch 的
+  H20 性能复测需要在新设备上执行。
 
 ## 本地准入门，已完成最小集
 
@@ -39,8 +40,8 @@
 | suffix/Hybrid kernel、动态 K、零预算、配置校验 | 47/47 kernel、51/51 配置通过；覆盖陈旧 scratch、跨轮停止长度、动态 K、独立 suffix 采样边界、有限探索和 DBO 拒绝 | 不重复完整套件 |
 | MTP 小模型贪心/logprobs | 原生 MTP 同 K 数值基线、cold/hot corpus 与完整输出检查通过 | 不重复 |
 | DFlash2、standard DFlash 真实 LLM | DFlash2 K7、standard DFlash K3 均通过；最终三 drafter 合并回归 3/3 | 不重复 |
-| 生命周期、max_tokens、preemption、结构化输出 | max_tokens、结构化 JSON、cold/hot slot 生命周期通过；全注意力 DFlash splice 实际 39 次抢占完成；EOS/stop 未单独枚举 | 不重复 |
-| 非零温度分布和 target logprobs | 结构化回退与非结构化真实换尾均覆盖 sync/async、分布及 target logprobs，4/4 通过 | 不重复完整分布实验 |
+| 生命周期、max_tokens、preemption、结构化输出 | max_tokens、结构化 JSON、cold/hot slot 生命周期通过；全注意力 DFlash splice 实际 39 次抢占完成；普通 pooling 真实输出完成及请求释放通过；EOS/stop 未单独枚举 | 不重复 |
+| 非零温度分布和 target logprobs | 结构化回退与 batch-invariant 真实换尾均覆盖 sync/async；绝对位置接受/拒绝检查通过，logprob 中位误差为 0，4/4 通过 | 不重复完整分布实验 |
 | 自定义/派生 speculator 拒绝、静态检查 | 本轮 10 个变更 Python 文件 Ruff/格式通过；复跑 patch 反向 apply 校验通过 | 不重复 |
 | 本地 DFlash2 K7、j=1/2/4 数据集扫描 | 已完成，六类均选择 j=1；原始结果和选择 JSON 已保存 | 不重复，只验证 j=1 |
 

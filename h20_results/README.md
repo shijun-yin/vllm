@@ -173,7 +173,31 @@ standard DFlash 完整 token/logprob E2E 为 1 passed in 101.12s；字符串 sto
 10 个变更 Python 文件的 Ruff、格式
 及差异空白检查通过。分布式 PP/PCP 和 H20 最终提交复测不在本地单卡覆盖范围内。
 
-### 最终提交的 RTX 4070 同期配对
+### Pooling 完成与 R4 绝对坐标复核
+
+后续提交 `4feaf2e05a559b346935151f688270e0e491becb` 修复普通 pooling 请求完成时
+读取空 `sampling_params.stop` 的共享 scheduler 回归，并把 R4 的草稿内偏移改为
+`start + draft_offset` 的输出绝对位置。接受位置额外核对该 token 等于实际接受的草稿；
+起点前的变化不再被误归为换尾结果。
+
+Pooling 定向回归为 `1 passed in 4.00s`，非零起点、起点前及接受 token 扰动等 CPU
+回归为 `5 passed, 8 deselected in 4.80s`。单卡 scheduler 全套为
+`307 passed, 3 deselected in 85.43s`，三项排除均因 PP=2/3 需要多张 GPU，未排除时其余
+307 项同样通过。
+
+首次修正坐标后的非 batch-invariant sync 在 rejected→target 上出现 0.1011306 的 logprob
+中位绝对偏差，未通过原 0.1 阈值。没有提高阈值；启用项目已有的 batch-invariant 执行后，
+同前缀、同实际生成 token 的误差归零。最终 sync/async 合并为 `2 passed in 226.35s`：
+sync 记录 486 个真实事件，async 记录 851 个，accepted/rejected 对 native 和 target 的
+logprob 中位误差均为 0.0，实际比较位置包含 2、3、5、6。原始文件为
+`reviewfix2_scheduler.log`、`reviewfix2_r4_sync.log`（数值漂移诊断）、
+`reviewfix2_r4_sync_batch_invariant.log`（单项诊断）和
+`reviewfix2_r4_sync_async.log`（最终两组）。
+
+上述改动没有重跑 4070 性能；下节性能仍明确归属于 `615057195c`。最新提交的 H20
+三组性能验收及 PP/PCP 实机覆盖仍待执行。
+
+### 615057195c 的 RTX 4070 同期配对
 
 代码提交为 `615057195c71e0dee4080d273c62bc8868015a99`。使用标准 DFlash K=15、j=1、
 B4、64K corpus、temperature=0.8、自然 EOS；每类 16 条请求，每波最多 384 token。
