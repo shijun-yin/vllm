@@ -31,6 +31,8 @@
   及 R4 绝对坐标已在本地修复并完成回归；`4feaf2e05a` 的 4070 同期性能复跑见
   `../h20_results/README.md`。H20 上述结果仍对应 `35359f54`，最新 patch 的 H20 性能复测
   需要在新设备上执行。
+- OmniInfer 启发的单 launch fused 已完成两轮三组对照；Coding 小幅改善，但 Blazedit 回退、
+  RAG 基本持平，因此默认保持顺序路径，仅用 `--parallel-lookup` 显式消融，详见结果说明。
 
 ## 本地准入门，已完成最小集
 
@@ -84,9 +86,13 @@ Python 前对 pure/splice 同时设置 `VLLM_WSL2_ENABLE_PIN_MEMORY=1`；JSON �
 
 `--warmup-wave` 会在每类数据正式 cold 前先跑一波，再清空 corpus 和统计，用于隔离
 首次 JIT/缓存与冷语料；warmup 不写入结果。`--profile-stages` 用 CUDA events 记录整步、
-原生起草、本地扫描、corpus/finalize、路由、反馈和入库。事件区间存在嵌套，不能求和当
-整波时间；事件创建和 Python 包装本身有开销，所以分段结果只用于归因，最终吞吐需关闭
-该开关重跑。`--profile-host` 只记录 host 区间、调用间隙和批次形状，不创建 CUDA
+原生起草、本地扫描、corpus lookup/finalize、路由、反馈和入库。所有事件共享一个计时
+原点，JSON 的 `overlap_ms` 报告阶段区间的真实交集；区间存在嵌套，不能求和当整波时间。
+事件创建和 Python 包装本身有开销，所以分段结果只用于归因，最终吞吐需关闭该开关重跑。
+`--parallel-lookup` 显式启用本地扫描与 corpus 查询的单 launch 并行；默认使用顺序路径。
+`--quality-profile` 按匹配深度和首个分叉位置记录候选接受量上下界，正数表示 splice
+相对原生更优、负数表示更差；无法确定的纠正路径形成上下界。该模式含额外主机同步，
+只用于质量诊断，不能用于吞吐验收。`--profile-host` 只记录 host 区间、调用间隙和批次形状，不创建 CUDA
 events；任何包装仍可能改变自然 EOS 轨迹，只能与其自身的输出哈希一起解释。
 `--native-spec-metrics` 开启 vLLM 原生逐请求 accepted/drafted/verified 数组，
 `--native-iteration-details` 开启原生逐步 batch/GPU elapsed 日志。`--jit-verbose` 记录

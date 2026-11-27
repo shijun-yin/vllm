@@ -245,6 +245,36 @@ hot-2 也有 8.553 s 的小幅慢波，另三轮为 8.253–8.354 s。Coding 两
 原始文件为 `perf4fe_pair1_pure.{json,log}`、`perf4fe_pair1_splice.{json,log}`、
 `perf4fe_pair2_splice.{json,log}`、`perf4fe_pair2_pure.{json,log}`。
 
+### OmniInfer 启发的查询优化验收
+
+本轮首先尝试本地扫描与 corpus 查询的双流并行，但 `overlap_ms` 实测两者交集为 0：
+数微秒的首次计算在第二次 Python/Triton launch 提交前已经结束。随后改为单 launch
+内的 fused 实现：本地块 program 与 corpus program 同时执行，最后仍按原规则归并。
+三 token 全失配预过滤不改变匹配结果，真实重叠区间和候选接受量上下界诊断只用于归因。
+
+48 项 suffix/hybrid kernel 回归通过，另有 60 组固定输入 sequential/fused 对照全部一致。
+Fused 的 greedy 为 `1 passed in 181.16s`，R4 sync/async 为 `2 passed in 286.24s`；最终默认
+顺序配置复核为 `1 passed in 180.43s`、`2 passed in 277.59s`。最终 R4 sync 486 个事件、
+async 851 个事件，accepted/rejected 对 native 和 target 的 logprob 中位误差均为 0。
+性能采用两轮三组无打点进程，每组都包含 pure、顺序 splice 和 fused，并交换执行顺序。
+两轮 pure、顺序和 fused 各自的逐请求 token 哈希及投机计数完全一致；本轮轨迹与此前
+`perf4fe_` 不同，因此只比较同期三组，不套用历史百分比。
+
+| 数据集 | Pure 两轮 tok/s | 顺序 splice 两轮 tok/s | Fused 两轮 tok/s | Fused/顺序两轮 |
+| --- | ---: | ---: | ---: | ---: |
+| Blazedit | 697.80 / 695.56 | 886.03 / 883.16 | 875.43 / 877.32 | −1.20% / −0.66% |
+| SPEED Coding | 884.67 / 880.91 | 888.46 / 886.20 | 892.45 / 890.42 | +0.45% / +0.48% |
+| SPEED RAG | 356.14 / 356.80 | 412.35 / 411.57 | 411.03 / 411.90 | −0.32% / +0.08% |
+
+顺序 splice 相对同组 pure 的三类收益方向均成立。Fused 仅在 Coding 上有约 0.46% 的
+小幅稳定改善，Blazedit 连续回退，RAG 基本持平，因此最终配置默认使用顺序路径，
+`suffix_hybrid_parallel_lookup=true` 仅保留为显式消融。基准脚本对应选项为
+`--parallel-lookup`。Fused 会预先计算 corpus，即使本地已有最长匹配；这可能是 Blazedit
+不利的一个路径因素，但本轮未单独量化其贡献，不把该解释当作已证实根因。
+
+性能原始文件以 `opt_pair1_`、`opt_pair2_` 为前缀。双流零重叠、顺序/fused 诊断和
+候选质量统计以 `opt_smoke_` 为前缀保存；带诊断的轨迹及时间不作为性能结论。
+
 ## 文件
 
 - `environment.txt`：H20 型号、显存、系统、磁盘与代码状态。

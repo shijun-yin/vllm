@@ -4,7 +4,8 @@ import json
 import os
 import random
 import time
-from collections import Counter
+from collections import Counter, defaultdict
+from itertools import pairwise
 from pathlib import Path
 
 import torch
@@ -30,15 +31,20 @@ class StageProfiler:
         self.events = {}
         self.intervals = {}
         self.programs = Counter()
+        self.origin = None
 
     def clear(self):
         self.events.clear()
         self.intervals.clear()
         self.programs.clear()
+        self.origin = None
 
     def invoke(self, name, fn, programs=0, shape=None):
         start_time = time.perf_counter()
         if self.record_events:
+            if self.origin is None:
+                self.origin = torch.cuda.Event(enable_timing=True)
+                self.origin.record()
             start = torch.cuda.Event(enable_timing=True)
             end = torch.cuda.Event(enable_timing=True)
             start.record()
@@ -140,9 +146,47 @@ class StageProfiler:
             "ingest",
         )
 
+    @staticmethod
+    def _merge_intervals(intervals):
+        merged = []
+        for start, end in sorted(intervals):
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+        return merged
+
+    @classmethod
+    def _overlap(cls, first, second):
+        first = cls._merge_intervals(first)
+        second = cls._merge_intervals(second)
+        overlap = 0.0
+        i = j = 0
+        while i < len(first) and j < len(second):
+            overlap += max(
+                0.0, min(first[i][1], second[j][1]) - max(first[i][0], second[j][0])
+            )
+            if first[i][1] < second[j][1]:
+                i += 1
+            else:
+                j += 1
+        return overlap
+
     def snapshot(self):
         if self.record_events:
             torch.cuda.synchronize()
+        relative = {}
+        if self.origin is not None:
+            for name, events in self.events.items():
+                relative[name] = self._merge_intervals(
+                    [
+                        (
+                            self.origin.elapsed_time(start),
+                            self.origin.elapsed_time(end),
+                        )
+                        for start, end in events
+                    ]
+                )
         result = {}
         for name, intervals in self.intervals.items():
             durations = [(end - start) * 1000 for start, end, _ in intervals]
@@ -157,10 +201,18 @@ class StageProfiler:
                 item["device_ms"] = sum(
                     start.elapsed_time(end) for start, end in self.events[name]
                 )
+                overlaps = {}
+                for other, other_intervals in relative.items():
+                    if other == name:
+                        continue
+                    overlap = self._overlap(relative[name], other_intervals)
+                    if overlap > 0:
+                        overlaps[other] = overlap
+                item["overlap_ms"] = overlaps
             if name == "execute_model":
                 gaps = [
                     max(0.0, current[0] - previous[1]) * 1000
-                    for previous, current in zip(intervals, intervals[1:])
+                    for previous, current in pairwise(intervals)
                 ]
                 item["gap_host_ms"] = sum(gaps)
                 item["max_gap_ms"] = max(gaps, default=0.0)
@@ -183,6 +235,137 @@ class StageProfiler:
         return result
 
 
+class SuffixQualityProfiler:
+    def __init__(self, runner):
+        self.runner = runner
+        self.splice = runner.splice
+        self.pending = {}
+        self.cohorts = defaultdict(Counter)
+        original_publish = self.splice._publish
+        original_prepare = self.splice.prepare_propose
+        original_add = self.splice.add_request
+
+        def add_request(req_index, new_req_data):
+            self.pending.pop(req_index, None)
+            return original_add(req_index, new_req_data)
+
+        def publish(input_batch, model_drafts, suffix_drafts, num_sampled, k):
+            drafts = original_publish(
+                input_batch, model_drafts, suffix_drafts, num_sampled, k
+            )
+            prefix_len = self.splice.prefix_len
+            for row, req_index in enumerate(input_batch.idx_mapping.tolist()):
+                if req_index < 0 or k <= prefix_len:
+                    continue
+                native = model_drafts[row, :k].cpu().tolist()
+                suffix = native[:prefix_len] + suffix_drafts[row].cpu().tolist()
+                if (
+                    len(suffix) != k
+                    or native == suffix
+                    or bool(self.splice.structured_output_mask[row].item())
+                    or int(self.splice.suffix.num_valid[row].item()) < k - prefix_len
+                    or int(self.splice.suffix.match_lens[row].item())
+                    < self.splice.min_match
+                    or int(num_sampled[row].item()) <= 0
+                    or any(token < 0 for token in native[:prefix_len])
+                ):
+                    continue
+                req_states = self.runner.req_states
+                self.pending[req_index] = {
+                    "req_id": req_states.index_to_req_id[req_index],
+                    "length": int(req_states.total_len.gpu[req_index].item()),
+                    "native": native,
+                    "suffix": suffix,
+                    "replaced": bool(self.splice.last_use_suffix[req_index].item()),
+                    "match_depth": int(self.splice.suffix.match_lens[row].item()),
+                    "prefix_len": prefix_len,
+                }
+                divergence = next(
+                    index
+                    for index, (left, right) in enumerate(
+                        zip(native, suffix, strict=True)
+                    )
+                    if left != right
+                )
+                trial = self.pending[req_index]
+                trial["divergence"] = divergence
+                cohort = self.cohorts[f"{trial['match_depth']}/{divergence + 1}"]
+                cohort["candidates"] += 1
+                cohort["replacements"] += int(trial["replaced"])
+            return drafts
+
+        def prepare_propose(input_batch, num_sampled, num_rejected):
+            for row, req_index in enumerate(input_batch.idx_mapping.tolist()):
+                trial = self.pending.pop(req_index, None)
+                if trial is None:
+                    continue
+                cohort = self.cohorts[
+                    f"{trial['match_depth']}/{trial['divergence'] + 1}"
+                ]
+                count = int(num_sampled[row].item())
+                accepted = count - 1
+                width = len(trial["native"])
+                verified = accepted + int(num_rejected[row].item())
+                req_states = self.runner.req_states
+                if (
+                    trial["req_id"] != req_states.index_to_req_id[req_index]
+                    or int(req_states.total_len.gpu[req_index].item())
+                    != trial["length"] + count
+                    or not 0 <= accepted <= width
+                    or verified != width
+                ):
+                    cohort["censored"] += 1
+                    continue
+                sampled = (
+                    req_states.all_token_ids.gpu[
+                        req_index, trial["length"] : trial["length"] + count
+                    ]
+                    .cpu()
+                    .tolist()
+                )
+                served = trial["suffix"] if trial["replaced"] else trial["native"]
+                other = trial["native"] if trial["replaced"] else trial["suffix"]
+                if sampled[:-1] != served[:accepted] or (
+                    accepted < width and sampled[-1] == served[accepted]
+                ):
+                    cohort["censored"] += 1
+                    continue
+                divergence = trial["divergence"]
+                if accepted < divergence:
+                    low = high = 0
+                elif accepted > divergence:
+                    low = high = accepted - divergence
+                elif sampled[-1] == other[divergence]:
+                    low, high = accepted - width, -1
+                else:
+                    low = high = 0
+                if not trial["replaced"]:
+                    low, high = -high, -low
+                cohort["verified"] += 1
+                cohort["delta_low"] += low
+                cohort["delta_high"] += high
+                if trial["replaced"]:
+                    cohort["accepted_tail_tokens"] += max(
+                        0, accepted - trial["prefix_len"]
+                    )
+            return original_prepare(input_batch, num_sampled, num_rejected)
+
+        self.splice.add_request = add_request
+        self.splice._publish = publish
+        self.splice.prepare_propose = prepare_propose
+
+    def reset(self):
+        self.pending.clear()
+        self.cohorts.clear()
+
+    def snapshot(self):
+        cohorts = {key: dict(values) for key, values in sorted(self.cohorts.items())}
+        totals = Counter()
+        for values in self.cohorts.values():
+            totals.update(values)
+        return {"totals": dict(totals), "cohorts": cohorts}
+
+
 class SpecStateExtension:
     def reset_spec_state(self):
         speculator = self.model_runner.speculator
@@ -190,7 +373,23 @@ class SpecStateExtension:
             speculator.reset_state()
         if self.model_runner.splice is not None:
             self.model_runner.splice.reset_state()
+        if hasattr(self, "quality_profiler"):
+            self.quality_profiler.reset()
         return True
+
+    def enable_quality_profile(self):
+        self.quality_profiler = SuffixQualityProfiler(self.model_runner)
+        return True
+
+    def reset_quality_profile(self):
+        if hasattr(self, "quality_profiler"):
+            self.quality_profiler.reset()
+        return True
+
+    def read_quality_profile(self):
+        if not hasattr(self, "quality_profiler"):
+            return None
+        return self.quality_profiler.snapshot()
 
     def read_hybrid_stats(self):
         splice = self.model_runner.splice
@@ -335,6 +534,8 @@ def run_wave(llm, prompts, wave, args):
     before = metric_values(llm)
     if args.profile_stages or args.profile_host:
         llm.collective_rpc("reset_stage_profile")
+    if args.quality_profile:
+        llm.collective_rpc("reset_quality_profile")
     start_timestamp = time.time()
     start = time.perf_counter()
     outputs = llm.generate(
@@ -386,6 +587,8 @@ def run_wave(llm, prompts, wave, args):
         ]
     if args.profile_stages or args.profile_host:
         result["stage_profile"] = llm.collective_rpc("read_stage_profile")[0]
+    if args.quality_profile:
+        result["quality_profile"] = llm.collective_rpc("read_quality_profile")[0]
     print(
         "WAVE_RESULT="
         + json.dumps(
@@ -428,6 +631,8 @@ def main():
         choices=["dual", "four", "four_fallback"],
         default="dual",
     )
+    parser.add_argument("--parallel-lookup", action="store_true")
+    parser.add_argument("--quality-profile", action="store_true")
     parser.add_argument("--target-model")
     parser.add_argument("--draft-model")
     parser.add_argument("--target-revision")
@@ -442,6 +647,8 @@ def main():
     parser.add_argument("--jit-verbose", action="store_true")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
+    if args.quality_profile and args.mode != "splice":
+        parser.error("--quality-profile requires --mode splice")
 
     if args.family == "mtp":
         model = (
@@ -503,6 +710,7 @@ def main():
                 suffix_hybrid_mode="splice",
                 suffix_hybrid_prefix_length=args.prefix_len,
                 suffix_hybrid_min_match_length=4,
+                suffix_hybrid_parallel_lookup=args.parallel_lookup,
             )
             if args.corpus_key_mode != "dual":
                 spec["suffix_hybrid_corpus_key_mode"] = args.corpus_key_mode
@@ -531,6 +739,8 @@ def main():
             "enable_stage_profile",
             kwargs={"record_events": args.profile_stages},
         )
+    if args.quality_profile:
+        llm.collective_rpc("enable_quality_profile")
     results = {}
     for dataset in datasets:
         llm.collective_rpc("reset_spec_state")
@@ -567,6 +777,8 @@ def main():
         "prefix_len": args.prefix_len,
         "corpus_tokens": args.corpus_tokens,
         "corpus_key_mode": args.corpus_key_mode,
+        "parallel_lookup": args.parallel_lookup,
+        "quality_profile": args.quality_profile or None,
         "batch_size": args.batch_size,
         "max_model_len": args.max_model_len,
         "gpu_memory_utilization": args.gpu_memory_utilization,

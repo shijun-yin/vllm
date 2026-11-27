@@ -34,6 +34,9 @@ def stage_metrics(result):
             )
             for key in total:
                 total[key] += values.get(key, 0)
+            overlaps = total.setdefault("overlap_ms", {})
+            for other, value in values.get("overlap_ms", {}).items():
+                overlaps[other] = overlaps.get(other, 0.0) + value
     return stages
 
 
@@ -55,6 +58,8 @@ def main():
         "draft_revision",
         "num_speculative_tokens",
         "corpus_key_mode",
+        "parallel_lookup",
+        "quality_profile",
         "temperature",
         "top_p",
         "top_k",
@@ -104,6 +109,13 @@ def main():
             f"| {splice_hot['tokens_per_second']:.2f} | {delta:+.2%} "
             f"| {pure_al:.3f} | {splice_al:.3f} | {observed} |"
         )
+        for wave in splice_result["waves"]:
+            quality = wave.get("quality_profile")
+            if quality:
+                print(
+                    f"{name} {wave['wave']} quality: "
+                    + json.dumps(quality["totals"], sort_keys=True)
+                )
         if not splice.get("profile_stages"):
             continue
         pure_stages = stage_metrics(pure_result)
@@ -122,6 +134,10 @@ def main():
                 f"| {p['host_ms']:.3f} | {s['host_ms']:.3f} "
                 f"| {p['calls']}/{s['calls']} |"
             )
+        for stage, values in sorted(splice_stages.items()):
+            for other, value in sorted(values.get("overlap_ms", {}).items()):
+                if stage < other:
+                    print(f"{name} overlap {stage} / {other}: {value:.3f} ms")
 
 
 if __name__ == "__main__":
