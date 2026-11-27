@@ -132,7 +132,13 @@ full-length candidate and can override the expected-acceptance threshold.
 `four_fallback` settings use an 8-slot 4-token specialization, optionally
 checking the 2-token table only when no valid 4-token candidate exists. They can
 change candidates and recall, so they are intended for ablation rather than a
-default behavior change.
+default behavior change. `suffix_hybrid_parallel_lookup` defaults to false and
+adds a corpus program to the local-scan launch when explicitly enabled, so both
+lookups can execute in parallel without an extra launch or stream dependency.
+This is an execution-only ablation; candidates are identical. Empty corpora and
+CUDA graph capture continue to use the sequential path. Local
+blocks also check the three-token necessary condition before deeper matching,
+so blocks with no surviving match stop before the fourth token check.
 
 Splice requires greedy drafting and standard verification. It does not support
 adaptive verification, `prefill_context_kv_only`, watermarking, DBO, or

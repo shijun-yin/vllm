@@ -638,6 +638,11 @@ class SpeculativeConfig:
     `four_fallback` checks the 2-token table only when the 4-token lookup has no
     valid candidate. Both can change candidates and are intended for ablation."""
 
+    suffix_hybrid_parallel_lookup: bool = False
+    """Add a corpus program to the local-scan launch so both lookups execute in
+    parallel. The original sequential path is used during CUDA graph capture and
+    when the corpus is empty. Candidate selection is unchanged."""
+
     draft_load_config: LoadConfig | None = None
     """Load config for the draft model. If not specified, will use the load
     config from the target model."""

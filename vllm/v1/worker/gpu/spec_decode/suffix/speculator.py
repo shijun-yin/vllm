@@ -72,7 +72,7 @@ def _bucket(hv, NUM_BUCKETS: tl.constexpr):
     return ((hv >> 29) ^ hv) & (NUM_BUCKETS - 1)
 
 
-@triton.jit
+@triton.jit(do_not_specialize=["num_scan_blocks"])
 def _suffix_local_scan_kernel(
     token_ids_ptr,  # *int32  [max_num_reqs, token_ids_stride]
     token_ids_stride,
@@ -85,12 +85,29 @@ def _suffix_local_scan_kernel(
     query_prefix_ptr,
     query_prefix_stride,
     Lp1,  # int64 packing radix (> any position)
+    num_scan_blocks,
+    table_ptr,
+    corpus_ptr,
+    corpus_len,
+    corpus_drafts_ptr,
+    corpus_drafts_stride,
+    corpus_match_lens_ptr,
+    corpus_num_valid_ptr,
     SKIP_ROWS: tl.constexpr,
     QUERY_PREFIX: tl.constexpr,
     REQUIRE_FULL: tl.constexpr,
+    PREFILTER: tl.constexpr,
+    PRECOMPUTED: tl.constexpr,
     K: tl.constexpr,
     MAX_DEPTH: tl.constexpr,
     BLOCK: tl.constexpr,
+    MIN_MATCH: tl.constexpr,
+    HASH_MUL: tl.constexpr,
+    NUM_BUCKETS: tl.constexpr,
+    SLOTS: tl.constexpr,
+    DEPTH_PO2: tl.constexpr,
+    K_PO2: tl.constexpr,
+    KEY_MODE: tl.constexpr,
 ):
     """Per (request, block): best (match_len, end_pos) packed into one int64.
 
@@ -104,6 +121,37 @@ def _suffix_local_scan_kernel(
     seq_len = tl.load(total_len_ptr + req).to(tl.int64)
     num_sampled = tl.load(num_sampled_ptr + b)
     row = token_ids_ptr + req * token_ids_stride
+    if PRECOMPUTED and blk == num_scan_blocks:
+        _suffix_corpus_lookup_kernel(
+            token_ids_ptr,
+            token_ids_stride,
+            idx_mapping_ptr,
+            total_len_ptr,
+            num_sampled_ptr,
+            skip_rows_ptr,
+            table_ptr,
+            corpus_ptr,
+            corpus_len,
+            corpus_drafts_ptr,
+            corpus_drafts_stride,
+            corpus_match_lens_ptr,
+            corpus_num_valid_ptr,
+            query_prefix_ptr,
+            query_prefix_stride,
+            QUERY_PREFIX,
+            SKIP_ROWS,
+            REQUIRE_FULL,
+            MIN_MATCH,
+            HASH_MUL,
+            NUM_BUCKETS,
+            SLOTS,
+            MAX_DEPTH,
+            DEPTH_PO2,
+            K,
+            K_PO2,
+            KEY_MODE,
+        )
+        return
 
     scratch_off = b * scratch_stride + blk
     skip = num_sampled <= 0
@@ -146,7 +194,9 @@ def _suffix_local_scan_kernel(
         active = ok & (tok == tail_tok)
         match_len += active.to(tl.int64)
         t += 1
-        if (t % 4 == 0) and (tl.max(active.to(tl.int32), axis=0) == 0):
+        if ((PREFILTER > 0 and t == PREFILTER) or (t % 4 == 0)) and (
+            tl.max(active.to(tl.int32), axis=0) == 0
+        ):
             t = MAX_DEPTH
 
     score = tl.where(match_len > 0, match_len * Lp1 + pos, 0)
@@ -440,6 +490,78 @@ def _corpus_draft(
     )
 
 
+@triton.jit
+def _suffix_corpus_lookup_kernel(
+    token_ids_ptr,
+    token_ids_stride,
+    idx_mapping_ptr,
+    total_len_ptr,
+    num_sampled_ptr,
+    skip_rows_ptr,
+    table_ptr,
+    corpus_ptr,
+    corpus_len,
+    corpus_drafts_ptr,
+    corpus_drafts_stride,
+    corpus_match_lens_ptr,
+    corpus_num_valid_ptr,
+    query_prefix_ptr,
+    query_prefix_stride,
+    QUERY_PREFIX: tl.constexpr,
+    SKIP_ROWS: tl.constexpr,
+    REQUIRE_FULL: tl.constexpr,
+    MIN_MATCH: tl.constexpr,
+    HASH_MUL: tl.constexpr,
+    NUM_BUCKETS: tl.constexpr,
+    SLOTS: tl.constexpr,
+    MAX_DEPTH: tl.constexpr,
+    DEPTH_PO2: tl.constexpr,
+    K: tl.constexpr,
+    K_PO2: tl.constexpr,
+    KEY_MODE: tl.constexpr,
+):
+    b = tl.program_id(0).to(tl.int64)
+    req = tl.load(idx_mapping_ptr + b).to(tl.int64)
+    seq_len = tl.load(total_len_ptr + req).to(tl.int64)
+    num_sampled = tl.load(num_sampled_ptr + b)
+    k_iota = tl.arange(0, K_PO2).to(tl.int64)
+    k_mask = k_iota < K
+    skip = num_sampled <= 0
+    if SKIP_ROWS:
+        skip = skip | tl.load(skip_rows_ptr + b)
+    if skip:
+        tl.store(corpus_drafts_ptr + b * corpus_drafts_stride + k_iota, 0, mask=k_mask)
+        tl.store(corpus_match_lens_ptr + b, 0)
+        tl.store(corpus_num_valid_ptr + b, 0)
+        return
+
+    row = token_ids_ptr + req * token_ids_stride
+    match_len, draft, num_valid = _corpus_draft(
+        row,
+        seq_len,
+        b,
+        table_ptr,
+        corpus_ptr,
+        corpus_len,
+        query_prefix_ptr,
+        query_prefix_stride,
+        QUERY_PREFIX,
+        REQUIRE_FULL,
+        MIN_MATCH,
+        HASH_MUL,
+        NUM_BUCKETS,
+        SLOTS,
+        MAX_DEPTH,
+        DEPTH_PO2,
+        K,
+        K_PO2,
+        KEY_MODE,
+    )
+    tl.store(corpus_drafts_ptr + b * corpus_drafts_stride + k_iota, draft, mask=k_mask)
+    tl.store(corpus_match_lens_ptr + b, match_len)
+    tl.store(corpus_num_valid_ptr + b, num_valid)
+
+
 @triton.jit(do_not_specialize=["num_blocks"])
 def _suffix_finalize_kernel(
     token_ids_ptr,  # *int32  [max_num_reqs, token_ids_stride]
@@ -456,6 +578,10 @@ def _suffix_finalize_kernel(
     corpus_ptr,  # *int32  [corpus_len]
     corpus_len,
     table_ptr,  # *int64  [2, NUM_BUCKETS, SLOTS]
+    precomputed_drafts_ptr,  # *int64  [B, K]
+    precomputed_drafts_stride,
+    precomputed_match_lens_ptr,  # *int32  [B]
+    precomputed_num_valid_ptr,  # *int32  [B]
     drafts_ptr,  # *int64  [B, K]  (output)
     drafts_stride,
     num_valid_ptr,  # *int32  [B]  (output)
@@ -470,6 +596,7 @@ def _suffix_finalize_kernel(
     QUERY_PREFIX: tl.constexpr,
     SKIP_ROWS: tl.constexpr,
     HAS_CORPUS: tl.constexpr,
+    PRECOMPUTED: tl.constexpr,
     ADAPTIVE: tl.constexpr,
     REQUIRE_FULL: tl.constexpr,
     MIN_MATCH: tl.constexpr,
@@ -522,7 +649,20 @@ def _suffix_finalize_kernel(
     draft_ok = k_mask & (idx < seq_len) & (l_len > 0)
     draft = tl.load(row + idx, mask=draft_ok, other=0).to(tl.int64)
 
-    if HAS_CORPUS:
+    if PRECOMPUTED:
+        g_len = tl.load(precomputed_match_lens_ptr + b)
+        g_draft = tl.load(
+            precomputed_drafts_ptr + b * precomputed_drafts_stride + k_iota,
+            mask=k_mask,
+            other=0,
+        )
+        g_n = tl.load(precomputed_num_valid_ptr + b)
+        use_corpus = (l_len < MAX_DEPTH) & (g_len > l_len)
+        draft = tl.where(use_corpus, g_draft, draft)
+        draft_ok = tl.where(use_corpus, k_iota < g_n, draft_ok)
+        match_len = tl.where(use_corpus, g_len, l_len)
+        source = use_corpus.to(tl.int64)
+    elif HAS_CORPUS:
         if l_len < MAX_DEPTH:
             g_len, g_draft, g_n = _corpus_draft(
                 row,
@@ -816,6 +956,9 @@ class SuffixSpeculator(BaseSpeculator):
             self.max_num_reqs, dtype=torch.int32, device=device
         )
         self.sources = torch.zeros(self.max_num_reqs, dtype=torch.int32, device=device)
+        self.corpus_drafts = torch.zeros_like(self.drafts)
+        self.corpus_match_lens = torch.zeros_like(self.match_lens)
+        self.corpus_num_valid = torch.zeros_like(self.num_valid)
 
         # Adaptive verification (optional): per-slot confidences from
         # acceptance statistics learned online.
@@ -952,6 +1095,7 @@ class SuffixSpeculator(BaseSpeculator):
         min_match: int,
         adaptive: bool,
         skip_rows: torch.Tensor | None = None,
+        parallel: bool = False,
     ) -> torch.Tensor:
         token_ids = self.req_states.all_token_ids.gpu
         total_len = self.req_states.total_len.gpu
@@ -959,7 +1103,16 @@ class SuffixSpeculator(BaseSpeculator):
         num_scan_blocks = self._num_scan_blocks(input_batch, prefix_len)
         skip_rows_ptr = skip_rows if skip_rows is not None else self.num_valid
         skip_rows_enabled = skip_rows is not None
-        _suffix_local_scan_kernel[(input_batch.num_reqs, num_scan_blocks)](
+
+        parallel_lookup = (
+            parallel
+            and self.has_corpus
+            and self.num_docs > 0
+            and not torch.cuda.is_current_stream_capturing()
+        )
+        _suffix_local_scan_kernel[
+            (input_batch.num_reqs, num_scan_blocks + int(parallel_lookup))
+        ](
             token_ids,
             token_ids.stride(0),
             idx_mapping,
@@ -971,12 +1124,29 @@ class SuffixSpeculator(BaseSpeculator):
             query_prefix,
             query_prefix.stride(0),
             self.max_model_len + 1,
+            num_scan_blocks,
+            self.table,
+            self.corpus,
+            self.corpus.shape[0],
+            self.corpus_drafts,
+            self.corpus_drafts.stride(0),
+            self.corpus_match_lens,
+            self.corpus_num_valid,
             SKIP_ROWS=skip_rows_enabled,
             QUERY_PREFIX=prefix_len,
             REQUIRE_FULL=require_full,
+            PREFILTER=3 if require_full else 0,
+            PRECOMPUTED=parallel_lookup,
             K=num_tokens,
             MAX_DEPTH=self.max_depth,
             BLOCK=self.block_l,
+            MIN_MATCH=min_match,
+            HASH_MUL=_HASH_MUL,
+            NUM_BUCKETS=self.num_buckets,
+            SLOTS=_BUCKET_SLOTS,
+            DEPTH_PO2=triton.next_power_of_2(self.max_depth),
+            K_PO2=max(1, triton.next_power_of_2(num_tokens)),
+            KEY_MODE=self.corpus_key_mode if require_full else 0,
             num_warps=4,
         )
         _suffix_finalize_kernel[(input_batch.num_reqs,)](
@@ -994,6 +1164,10 @@ class SuffixSpeculator(BaseSpeculator):
             self.corpus,
             self.corpus.shape[0],
             self.table,
+            self.corpus_drafts,
+            self.corpus_drafts.stride(0),
+            self.corpus_match_lens,
+            self.corpus_num_valid,
             self.drafts,
             self.drafts.stride(0),
             self.num_valid,
@@ -1007,7 +1181,8 @@ class SuffixSpeculator(BaseSpeculator):
             query_prefix.stride(0),
             QUERY_PREFIX=prefix_len,
             SKIP_ROWS=skip_rows_enabled,
-            HAS_CORPUS=self.has_corpus and self.num_docs > 0,
+            HAS_CORPUS=self.has_corpus and self.num_docs > 0 and not parallel_lookup,
+            PRECOMPUTED=parallel_lookup,
             ADAPTIVE=adaptive,
             REQUIRE_FULL=require_full,
             MIN_MATCH=min_match,
@@ -1108,5 +1283,6 @@ class SuffixSpeculator(BaseSpeculator):
             min_match=spec.suffix_hybrid_min_match_length,
             adaptive=False,
             skip_rows=skip_rows,
+            parallel=getattr(spec, "suffix_hybrid_parallel_lookup", False),
         )
         return drafts[:, :num_tokens]

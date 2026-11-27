@@ -337,12 +337,14 @@ def run_suffix_query(
     min_match=4,
     max_len=64,
     key_mode="dual",
+    parallel=True,
 ):
     spec, req_states = _make(
         num_tokens, 8, 1, max_len, corpus_tokens=1024 if docs else 0
     )
     spec.vllm_config.speculative_config.suffix_hybrid_min_match_length = min_match
     spec.vllm_config.speculative_config.suffix_hybrid_corpus_key_mode = key_mode
+    spec.vllm_config.speculative_config.suffix_hybrid_parallel_lookup = parallel
     spec.corpus_key_mode = {"dual": 0, "four": 1, "four_fallback": 2}[key_mode]
     for index, doc in enumerate(docs):
         _set(req_states, 0, [], doc)
@@ -370,6 +372,19 @@ def run_suffix_query(
         int(num_valid[0]),
         int(spec.match_lens[0].item()),
     )
+
+
+def test_splice_parallel_lookup_matches_sequential():
+    docs = [
+        [0, 1, 0, 1, 9],
+        [8, 0, 1, 20, 21],
+        [8, 0, 1, 30, 31],
+        [8, 0, 1, 40, 41],
+    ]
+    args = ([5, 0, 1, 0], 2)
+    kwargs = {"prefix": [1], "docs": docs, "min_match": 2}
+    expected = run_suffix_query(*args, **kwargs, parallel=False)
+    assert run_suffix_query(*args, **kwargs, parallel=True) == expected
 
 
 def test_splice_lookup_changes_continuation_without_mutating_history():
